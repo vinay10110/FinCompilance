@@ -1,34 +1,43 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from '/vite.svg'
-import './App.css'
+import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom'
+import { ChakraProvider, Box, Flex, VStack, Heading, Text } from '@chakra-ui/react'
+import DocumentUpload from './components/DocumentUpload'
+import ResultsList from './components/ResultsList'
+import ImplementationPlan from './components/ImplementationPlan'
+import ComplianceVerification from './components/ComplianceVerification'
+import Navigation from './components/Navigation'
 
 function App() {
-  const [count, setCount] = useState(0)
-
   return (
-    <>
-      <div>
-        <a href="https://vite.dev" target="_blank">
-          <img src={viteLogo} className="logo" alt="Vite logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <h1>Vite + React</h1>
-      <div className="card">
-        <button onClick={() => setCount((count) => count + 1)}>
-          count is {count}
-        </button>
-        <p>
-          Edit <code>src/App.jsx</code> and save to test HMR
-        </p>
-      </div>
-      <p className="read-the-docs">
-        Click on the Vite and React logos to learn more
-      </p>
-    </>
+    <ChakraProvider>
+      <Router>
+        <Box minH="100vh" bg="gray.50">
+          <Navigation />
+          
+          <Box maxW="1200px" mx="auto" p={6}>
+            <Routes>
+              <Route path="/" element={
+                <VStack spacing={8} align="stretch">
+                  <Heading>RBI Compliance Automation System</Heading>
+                  <DocumentUpload />
+                  <ResultsList />
+                </VStack>
+              } />
+              
+              <Route path="/plan/:id" element={<ImplementationPlan />} />
+              <Route path="/verify/:id" element={<ComplianceVerification />} />
+              
+              <Route path="*" element={
+                <Box textAlign="center" py={10}>
+                  <Heading size="xl">404: Page Not Found</Heading>
+                  <Text mt={4}>The page you're looking for doesn't exist.</Text>
+                  <Link to="/">Return Home</Link>
+                </Box>
+              } />
+            </Routes>
+          </Box>
+        </Box>
+      </Router>
+    </ChakraProvider>
   )
 }
 
