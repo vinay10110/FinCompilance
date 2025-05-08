@@ -2,6 +2,11 @@ from pydantic import BaseModel, Field
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 from enum import Enum
+from sqlalchemy import Column, Integer, String, DateTime, Text, Boolean, create_engine
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
+
+Base = declarative_base()
 
 class ChangeType(str, Enum):
     MINOR = "minor"
@@ -97,3 +102,23 @@ class ComplianceVerification(BaseModel):
     evidence: Dict[str, Any] = Field(default_factory=dict)
     reviewer: Optional[str] = None
     status: str = "pending"
+
+class RBIUpdate(Base):
+    __tablename__ = "rbi_updates"
+
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String(500), nullable=False)
+    press_release_link = Column(String(1000), unique=True, nullable=False)
+    pdf_link = Column(String(1000), nullable=True)
+    date_published = Column(DateTime, nullable=True)
+    date_scraped = Column(DateTime, default=datetime.utcnow)
+    is_new = Column(Boolean, default=True)
+    content_summary = Column(Text, nullable=True)
+
+# Database connection
+DATABASE_URL = "postgresql://postgres:postgres@localhost:5432/rbi_compliance"
+engine = create_engine(DATABASE_URL)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+# Create all tables
+Base.metadata.create_all(bind=engine)

@@ -13,12 +13,15 @@ const Navigation = () => {
       bg={bgColor}
       borderBottom="1px"
       borderColor={borderColor}
-      position="sticky"
+      position="fixed"
       top={0}
-      zIndex={10}
+      left={0}
+      right={0}
+      zIndex={1000}
+      boxShadow="sm"
     >
       <Flex
-        maxW="1200px"
+        maxW="100%"
         mx="auto"
         px={6}
         py={4}

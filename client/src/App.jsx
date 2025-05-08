@@ -11,28 +11,26 @@ function App() {
     <ClerkProvider publishableKey={clerkPubKey}>
       <ChakraProvider>
         <Router>
-          <Box minH="100vh" display="flex" flexDirection="column">
+          <Box minH="100vh">
             <Navigation />
-            <Box flex="1" display="flex" flexDirection="column">
-              <Routes>
-                <Route path="/sign-in/*" element={<SignIn routing="path" path="/sign-in" />} />
-                <Route path="/sign-up/*" element={<SignUp routing="path" path="/sign-up" />} />
-                
-                <Route
-                  path="/"
-                  element={
-                    <>
-                      <SignedIn>
-                        <ChatInterface />
-                      </SignedIn>
-                      <SignedOut>
-                        <RedirectToSignIn />
-                      </SignedOut>
-                    </>
-                  }
-                />
-              </Routes>
-            </Box>
+            <Routes>
+              <Route path="/sign-in/*" element={<SignIn routing="path" path="/sign-in" />} />
+              <Route path="/sign-up/*" element={<SignUp routing="path" path="/sign-up" />} />
+              
+              <Route
+                path="/"
+                element={
+                  <>
+                    <SignedIn>
+                      <ChatInterface />
+                    </SignedIn>
+                    <SignedOut>
+                      <RedirectToSignIn />
+                    </SignedOut>
+                  </>
+                }
+              />
+            </Routes>
           </Box>
         </Router>
       </ChakraProvider>
