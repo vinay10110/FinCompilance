@@ -18,7 +18,7 @@ import {
   HStack,
 } from '@chakra-ui/react'
 import { FiExternalLink, FiRefreshCcw, FiDownload, FiCheck, FiBell } from 'react-icons/fi'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 
 const UpdateItem = ({ update, onMarkRead }) => {
   const bgColor = useColorModeValue('gray.50', 'gray.700')
@@ -99,24 +99,28 @@ const Sidebar = () => {
   const borderColor = useColorModeValue('gray.200', 'gray.700')
   const toast = useToast()
   
-  const fetchUpdates = async () => {
+  const fetchUpdates = useCallback(async () => {
     try {
       setIsLoading(true)
       const response = await fetch('/api/updates')
       if (!response.ok) throw new Error('Failed to fetch updates')
       const data = await response.json()
       
-      // Split updates into new and previous
-      const newUpdates = data.updates.filter(u => u.is_new)
-      const previousUpdates = data.updates.filter(u => !u.is_new)
-      
-      setUpdates({
-        new: newUpdates,
-        previous: previousUpdates
-      })
-      
-      // Set notification state if there are new updates
-      setHasNewUpdates(newUpdates.length > 0)
+      if (data.status === 'success' && Array.isArray(data.updates)) {
+        // Split updates based on is_new flag
+        const newUpdates = data.updates.filter(u => u.is_new)
+        const previousUpdates = data.updates.filter(u => !u.is_new)
+        
+        setUpdates({
+          new: newUpdates,
+          previous: previousUpdates
+        })
+        
+        // Set notification state if there are new updates
+        setHasNewUpdates(newUpdates.length > 0)
+      } else {
+        throw new Error('Invalid response format')
+      }
     } catch (error) {
       console.error('Error fetching updates:', error)
       toast({
@@ -129,14 +133,36 @@ const Sidebar = () => {
     } finally {
       setIsLoading(false)
     }
-  }
+  }, [toast])
 
-  // Poll for updates every 5 minutes
+  // Initial fetch and poll for updates every 5 minutes
   useEffect(() => {
     fetchUpdates()
-    const interval = setInterval(fetchUpdates, 5 * 60 * 1000)
+    const interval = setInterval(async () => {
+      // Check for new updates
+      try {
+        const response = await fetch('/api/updates/check')
+        if (!response.ok) throw new Error('Failed to check updates')
+        const data = await response.json()
+        
+        if (data.status === 'success' && data.updates.length > 0) {
+          // If new updates found, refresh the full list
+          fetchUpdates()
+          toast({
+            title: 'New Updates Available',
+            description: `${data.updates.length} new update(s) found`,
+            status: 'info',
+            duration: 5000,
+            isClosable: true,
+          })
+        }
+      } catch (error) {
+        console.error('Error checking updates:', error)
+      }
+    }, 5 * 60 * 1000)
+    
     return () => clearInterval(interval)
-  }, [fetchUpdates])
+  }, [fetchUpdates, toast])
 
   const handleMarkRead = async (pressReleaseLink) => {
     try {
@@ -150,8 +176,8 @@ const Sidebar = () => {
       
       if (!response.ok) throw new Error('Failed to mark update as read')
       
-      // Refresh updates
-      await fetchUpdates()
+      // Refresh updates after marking as read
+      fetchUpdates()
       
     } catch (error) {
       console.error('Error marking update as read:', error)

@@ -60,44 +60,52 @@ async def chat_endpoint(request: ChatRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/updates", response_model=WebScraperResponse)
-async def get_updates(background_tasks: BackgroundTasks, new_only: bool = False):
-    """Get latest updates and trigger new scraping in background"""
+async def get_updates(background_tasks: BackgroundTasks):
+    """Get all updates and trigger new scraping"""
     try:
-        # Get stored updates
-        updates = scraper.get_updates(new_only=new_only)
-        
-        # Trigger new scraping in background
-        background_tasks.add_task(scraper.scrape)
+        # Get updates from scraper
+        result = scraper.scrape()
         
         return WebScraperResponse(
             status="success",
-            updates=updates
+            updates=result["all_updates"]
         )
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        return WebScraperResponse(
+            status="error",
+            updates=[],
+            error=str(e)
+        )
 
 @app.post("/api/updates/check", response_model=WebScraperResponse)
 async def check_updates():
-    """Manually trigger update check"""
+    """Manually trigger update check and return new updates"""
     try:
-        new_updates = scraper.scrape()
+        result = scraper.scrape()
         return WebScraperResponse(
             status="success",
-            updates=new_updates
+            updates=result["new_updates"] if result["new_updates"] else []
         )
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        return WebScraperResponse(
+            status="error",
+            updates=[],
+            error=str(e)
+        )
 
 @app.post("/api/updates/mark-read")
 async def mark_as_read(request: MarkAsReadRequest):
     """Mark an update as read"""
     try:
+        if not request.press_release_link:
+            raise ValueError("press_release_link is required")
+            
         scraper.mark_as_read(request.press_release_link)
         return {"status": "success"}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        return {"status": "error", "error": str(e)}
 
 def start_api():
     """Start the FastAPI server"""

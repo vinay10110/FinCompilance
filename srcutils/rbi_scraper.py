@@ -3,8 +3,6 @@ from bs4 import BeautifulSoup
 from datetime import datetime
 import logging
 from typing import List, Dict, Any
-from sqlalchemy.orm import Session
-from ..srcmodels.document_models import RBIUpdate, SessionLocal
 import dateutil.parser
 import pytz
 
@@ -14,6 +12,8 @@ class RBIWebScraper:
     def __init__(self):
         self.base_url = "https://rbi.org.in/Scripts/"
         self.page_url = "https://rbi.org.in/Scripts/BS_PressReleaseDisplay.aspx"
+        self.logger = logging.getLogger(__name__)
+        self.previous_updates = []  # Store previous updates in memory
         
     def _parse_date(self, date_str: str) -> datetime:
         """Parse date string into datetime object"""
@@ -23,123 +23,83 @@ class RBIWebScraper:
             ist = pytz.timezone('Asia/Kolkata')
             return date.astimezone(ist)
         except Exception as e:
-            logger.error(f"Error parsing date {date_str}: {e}")
+            self.logger.error(f"Error parsing date {date_str}: {e}")
             return None
 
-    def scrape(self) -> List[Dict[str, Any]]:
-        """Scrape RBI website for new press releases"""
+    def scrape(self) -> Dict[str, Any]:
+        """Scrape RBI website for updates and compare with previous scrape"""
         try:
+            self.logger.info("Starting RBI website scraping")
             response = requests.get(self.page_url)
             response.raise_for_status()
+
+            if not response.content:
+                self.logger.error("Empty response from RBI website")
+                return {"all_updates": [], "new_updates": []}
+
             soup = BeautifulSoup(response.content, "html.parser")
             rows = soup.find_all("tr")
-
-            db = SessionLocal()
-            new_updates = []
-
-            try:
-                for row in rows:
+            
+            current_updates = []
+            
+            for row in rows:
+                try:
                     link_tag = row.find("a", class_="link2")
                     if not link_tag:
                         continue
 
                     title = link_tag.text.strip()
-                    relative_link = link_tag["href"]
+                    relative_link = link_tag.get("href")
+                    
+                    if not relative_link:
+                        self.logger.warning(f"No href found for title: {title}")
+                        continue
+                        
                     full_link = self.base_url + relative_link
 
-                    # Check if press release already exists
-                    existing = db.query(RBIUpdate).filter_by(
-                        press_release_link=full_link
-                    ).first()
-                    
-                    if existing:
-                        continue
-
                     pdf_tag = row.find("a", target="_blank")
-                    pdf_url = pdf_tag["href"] if pdf_tag else None
+                    pdf_url = pdf_tag.get("href") if pdf_tag else None
 
-                    # Extract date if available
                     date_cell = row.find("td", width="15%")
                     date_str = date_cell.text.strip() if date_cell else None
                     date_published = self._parse_date(date_str) if date_str else None
 
-                    # Create new update record
-                    update = RBIUpdate(
-                        title=title,
-                        press_release_link=full_link,
-                        pdf_link=pdf_url,
-                        date_published=date_published,
-                        date_scraped=datetime.utcnow(),
-                        is_new=True
-                    )
-
-                    db.add(update)
-                    db.commit()
+                    update = {
+                        "title": title,
+                        "press_release_link": full_link,
+                        "pdf_link": pdf_url,
+                        "date_published": date_published.isoformat() if date_published else None,
+                        "date_scraped": datetime.utcnow().isoformat(),
+                        "is_new": False
+                    }
                     
-                    new_updates.append({
-                        "title": update.title,
-                        "press_release_link": update.press_release_link,
-                        "pdf_link": update.pdf_link,
-                        "date_published": update.date_published.isoformat() if update.date_published else None,
-                        "date_scraped": update.date_scraped.isoformat(),
-                        "is_new": update.is_new
-                    })
+                    current_updates.append(update)
 
-            finally:
-                db.close()
+                except Exception as row_error:
+                    self.logger.error(f"Error processing row: {str(row_error)}")
+                    continue
 
-            logger.info(f"Found {len(new_updates)} new press releases")
-            return new_updates
+            # Find new updates by comparing with previous scrape
+            new_updates = []
+            if self.previous_updates:
+                previous_links = {u["press_release_link"] for u in self.previous_updates}
+                new_updates = [
+                    {**update, "is_new": True}
+                    for update in current_updates
+                    if update["press_release_link"] not in previous_links
+                ]
+            
+            # Store current updates for future comparison
+            self.previous_updates = current_updates
+            
+            return {
+                "all_updates": current_updates,
+                "new_updates": new_updates
+            }
 
+        except requests.RequestException as req_error:
+            self.logger.error(f"Request error while scraping RBI website: {str(req_error)}")
+            return {"all_updates": [], "new_updates": []}
         except Exception as e:
-            logger.error(f"Error scraping RBI website: {e}")
-            return []
-
-    def get_updates(self, limit: int = 10, new_only: bool = False) -> List[Dict[str, Any]]:
-        """Get updates from database"""
-        try:
-            db = SessionLocal()
-            try:
-                query = db.query(RBIUpdate)
-                
-                if new_only:
-                    query = query.filter(RBIUpdate.is_new == True)
-                
-                updates = query.order_by(
-                    RBIUpdate.date_published.desc()
-                ).limit(limit).all()
-
-                return [{
-                    "title": update.title,
-                    "press_release_link": update.press_release_link,
-                    "pdf_link": update.pdf_link,
-                    "date_published": update.date_published.isoformat() if update.date_published else None,
-                    "date_scraped": update.date_scraped.isoformat(),
-                    "is_new": update.is_new
-                } for update in updates]
-
-            finally:
-                db.close()
-
-        except Exception as e:
-            logger.error(f"Error getting updates from database: {e}")
-            return []
-
-    def mark_as_read(self, press_release_link: str):
-        """Mark an update as read (not new)"""
-        try:
-            db = SessionLocal()
-            try:
-                update = db.query(RBIUpdate).filter_by(
-                    press_release_link=press_release_link
-                ).first()
-                
-                if update:
-                    update.is_new = False
-                    db.commit()
-                    
-            finally:
-                db.close()
-
-        except Exception as e:
-            logger.error(f"Error marking update as read: {e}")
+            self.logger.error(f"Unexpected error while scraping RBI website: {str(e)}")
+            return {"all_updates": [], "new_updates": []}
