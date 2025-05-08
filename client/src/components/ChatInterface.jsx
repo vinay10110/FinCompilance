@@ -19,7 +19,7 @@ import {
 import { FiSend, FiRefreshCcw, FiChevronDown, FiChevronUp, FiExternalLink, FiCheckCircle } from 'react-icons/fi'
 import Sidebar from './Sidebar'
 
-const UpdatesPanel = ({ updates, isLoading, onRefresh, onUpdateRead }) => {
+const UpdatesPanel = ({ updates, isLoading, onRefresh, onUpdateRead, onDocumentSelect, selectedDoc }) => {
   const [isOpen, setIsOpen] = useState(true)
   const bgColor = useColorModeValue('white', 'gray.800')
   const borderColor = useColorModeValue('gray.200', 'gray.700')
@@ -65,6 +65,10 @@ const UpdatesPanel = ({ updates, isLoading, onRefresh, onUpdateRead }) => {
                 borderRadius="lg"
                 bg={updateBgColor}
                 position="relative"
+                onClick={() => onDocumentSelect(update)}
+                cursor="pointer"
+                border={selectedDoc?.press_release_link === update.press_release_link ? '2px solid' : 'none'}
+                borderColor={selectedDoc?.press_release_link === update.press_release_link ? 'blue.500' : 'transparent'}
               >
                 {update.is_new && (
                   <IconButton
@@ -73,7 +77,10 @@ const UpdatesPanel = ({ updates, isLoading, onRefresh, onUpdateRead }) => {
                     position="absolute"
                     top={2}
                     right={2}
-                    onClick={() => onUpdateRead(update.press_release_link)}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      onUpdateRead(update.press_release_link)
+                    }}
                     aria-label="Mark as read"
                     colorScheme="green"
                     variant="ghost"
@@ -135,6 +142,9 @@ const Message = ({ message, isUser }) => {
     message.isUser ? 'transparent' : 'gray.50',
     message.isUser ? 'transparent' : 'gray.800'
   )
+  
+  const contextBgColor = useColorModeValue('gray.50', 'gray.700')
+  const contextTextColor = useColorModeValue('gray.600', 'gray.300')
 
   return (
     <Box 
@@ -160,24 +170,63 @@ const Message = ({ message, isUser }) => {
             src={!isUser ? '/vite.svg' : undefined}
             bg={isUser ? 'blue.500' : 'green.500'}
           />
-          <Box
-            bg={bgColor}
-            px={6}
-            py={4}
-            borderRadius="2xl"
-            borderTopLeftRadius={!isUser ? 'md' : undefined}
-            borderTopRightRadius={isUser ? 'md' : undefined}
-            shadow="sm"
-          >
-            <Text 
-              whiteSpace="pre-wrap" 
-              color={textColor}
-              fontSize="sm"
-              lineHeight="tall"
+          <VStack align={isUser ? 'flex-end' : 'flex-start'} spacing={2} flex={1}>
+            <Box
+              bg={bgColor}
+              px={6}
+              py={4}
+              borderRadius="2xl"
+              borderTopLeftRadius={!isUser ? 'md' : undefined}
+              borderTopRightRadius={isUser ? 'md' : undefined}
+              shadow="sm"
+              width="100%"
             >
-              {message.content}
-            </Text>
-          </Box>
+              <Text 
+                whiteSpace="pre-wrap" 
+                color={textColor}
+                fontSize="sm"
+                lineHeight="tall"
+              >
+                {message.content}
+              </Text>
+            </Box>
+            
+            {/* Show context if available */}
+            {!isUser && message.context && message.context.length > 0 && (
+              <Box
+                bg={contextBgColor}
+                p={4}
+                borderRadius="xl"
+                width="100%"
+                fontSize="xs"
+              >
+                <Text fontWeight="medium" mb={2} color={contextTextColor}>
+                  Relevant Document Excerpts:
+                </Text>
+                <VStack align="stretch" spacing={3}>
+                  {message.context.map((ctx, idx) => (
+                    <Box key={idx}>
+                      <Text color={contextTextColor}>
+                        {ctx.chunk}
+                      </Text>
+                      {ctx.metadata?.page_number && (
+                        <Text color={contextTextColor} mt={1} fontStyle="italic">
+                          Page {ctx.metadata.page_number}
+                        </Text>
+                      )}
+                    </Box>
+                  ))}
+                </VStack>
+              </Box>
+            )}
+
+            {/* Show summary badge if it's a summary message */}
+            {!isUser && message.isSummary && (
+              <Badge colorScheme="purple" mt={1}>
+                Document Summary
+              </Badge>
+            )}
+          </VStack>
         </Flex>
       </Flex>
     </Box>
@@ -187,7 +236,7 @@ const Message = ({ message, isUser }) => {
 const ChatInterface = () => {
   const [messages, setMessages] = useState([
     {
-      content: "Hello! I'm your AI assistant. How can I help you with compliance today?",
+      content: "Hello! I'm your AI assistant. I can help you understand RBI documents. Select a document to get started!",
       isUser: false,
     },
   ])
@@ -195,6 +244,8 @@ const ChatInterface = () => {
   const [isLoading, setIsLoading] = useState(false)
   const [updates, setUpdates] = useState([])
   const [isUpdatesLoading, setIsUpdatesLoading] = useState(false)
+  const [selectedDoc, setSelectedDoc] = useState(null)
+  const [context, setContext] = useState([])
   const messagesEndRef = useRef(null)
   const textareaRef = useRef(null)
   const toast = useToast()
@@ -251,20 +302,27 @@ const ChatInterface = () => {
     }
   }
 
-  useEffect(() => {
-    fetchUpdates()
-    // Poll for updates every 5 minutes
-    const interval = setInterval(fetchUpdates, 5 * 60 * 1000)
-    return () => clearInterval(interval)
-  }, [fetchUpdates])
-
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  const handleDocumentSelect = (update) => {
+    if (update.doc_id) {
+      setSelectedDoc(update)
+      setMessages(prev => [
+        ...prev,
+        {
+          content: `Now chatting about: ${update.title}`,
+          isUser: false,
+          isSystem: true
+        }
+      ])
+    } else {
+      toast({
+        title: 'Document Not Available',
+        description: 'This update does not have an associated document to chat about.',
+        status: 'warning',
+        duration: 3000,
+        isClosable: true,
+      })
+    }
   }
-
-  useEffect(() => {
-    scrollToBottom()
-  }, [messages])
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -283,16 +341,21 @@ const ChatInterface = () => {
         },
         body: JSON.stringify({ 
           message: input,
-          context: {
-            latest_update: updates[0] // Send latest update as context
-          }
+          doc_id: selectedDoc?.doc_id
         }),
       })
 
       if (!response.ok) throw new Error('Failed to get response')
 
       const data = await response.json()
-      setMessages(prev => [...prev, { content: data.response, isUser: false }])
+      
+      // Update context and add AI response
+      setContext(data.context || [])
+      setMessages(prev => [...prev, { 
+        content: data.response, 
+        isUser: false,
+        context: data.context
+      }])
     } catch (error) {
       console.error('Error:', error)
       toast({
@@ -314,6 +377,58 @@ const ChatInterface = () => {
     }
   }
 
+  const handleSummarize = async () => {
+    if (!selectedDoc?.doc_id) return
+    
+    setIsLoading(true)
+    try {
+      const response = await fetch('/api/summarize', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ 
+          doc_ids: [selectedDoc.doc_id]
+        }),
+      })
+
+      if (!response.ok) throw new Error('Failed to get summary')
+
+      const data = await response.json()
+      setMessages(prev => [...prev, { 
+        content: data.summaries[0].summary,
+        isUser: false,
+        isSummary: true
+      }])
+    } catch (error) {
+      console.error('Error:', error)
+      toast({
+        title: 'Error',
+        description: 'Failed to generate summary. Please try again.',
+        status: 'error',
+        duration: 5000,
+        isClosable: true,
+      })
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    fetchUpdates()
+    // Poll for updates every 5 minutes
+    const interval = setInterval(fetchUpdates, 5 * 60 * 1000)
+    return () => clearInterval(interval)
+  }, [fetchUpdates])
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }
+
+  useEffect(() => {
+    scrollToBottom()
+  }, [messages])
+
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
@@ -323,10 +438,11 @@ const ChatInterface = () => {
 
   return (
     <Flex h="calc(100vh - 72px)" w="100%" position="fixed" top="72px" left="0" right="0" bottom="0">
-      {/* Sidebar - Now on the left */}
-      <Sidebar />
+      <Sidebar 
+        onDocumentSelect={handleDocumentSelect}
+        selectedDoc={selectedDoc}
+      />
 
-      {/* Main Chat Area */}
       <Box
         flex="1"
         display="flex"
@@ -342,9 +458,10 @@ const ChatInterface = () => {
           isLoading={isUpdatesLoading}
           onRefresh={fetchUpdates}
           onUpdateRead={handleUpdateRead}
+          onDocumentSelect={handleDocumentSelect}
+          selectedDoc={selectedDoc}
         />
 
-        {/* Messages Area */}
         <Box
           flex="1"
           overflowY="auto"
@@ -394,7 +511,6 @@ const ChatInterface = () => {
           </VStack>
         </Box>
 
-        {/* Input Area */}
         <Box
           position="absolute"
           bottom={0}
@@ -411,44 +527,61 @@ const ChatInterface = () => {
             maxW="7xl"
             mx="auto"
           >
-            <HStack align="flex-end" spacing={3}>
-              <Textarea
-                ref={textareaRef}
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder="Type your message..."
-                resize="none"
-                rows={1}
-                maxRows={5}
-                minH="44px"
-                maxH="200px"
-                p={3}
-                bg={useColorModeValue('gray.100', 'gray.700')}
-                borderRadius="xl"
-                border="none"
-                _focus={{
-                  boxShadow: 'none',
-                  bg: useColorModeValue('gray.200', 'gray.600'),
-                }}
-                _hover={{
-                  bg: useColorModeValue('gray.200', 'gray.600'),
-                }}
-                fontSize="sm"
-                flex="1"
-              />
-              <IconButton
-                type="submit"
-                aria-label="Send message"
-                icon={<FiSend />}
-                colorScheme="blue"
-                isLoading={isLoading}
-                isDisabled={!input.trim() || isLoading}
-                size="lg"
-                borderRadius="xl"
-                variant="solid"
-              />
-            </HStack>
+            <VStack spacing={3}>
+              {selectedDoc && (
+                <HStack w="100%" justify="space-between">
+                  <Text fontSize="sm" color="gray.500">
+                    Chatting about: {selectedDoc.title}
+                  </Text>
+                  <Button
+                    size="sm"
+                    onClick={handleSummarize}
+                    isDisabled={isLoading}
+                  >
+                    Summarize Document
+                  </Button>
+                </HStack>
+              )}
+              <HStack w="100%" align="flex-end" spacing={3}>
+                <Textarea
+                  ref={textareaRef}
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder={selectedDoc ? "Ask me about this document..." : "Select a document to start chatting..."}
+                  resize="none"
+                  rows={1}
+                  maxRows={5}
+                  minH="44px"
+                  maxH="200px"
+                  p={3}
+                  bg={useColorModeValue('gray.100', 'gray.700')}
+                  borderRadius="xl"
+                  border="none"
+                  _focus={{
+                    boxShadow: 'none',
+                    bg: useColorModeValue('gray.200', 'gray.600'),
+                  }}
+                  _hover={{
+                    bg: useColorModeValue('gray.200', 'gray.600'),
+                  }}
+                  fontSize="sm"
+                  flex="1"
+                  isDisabled={!selectedDoc}
+                />
+                <IconButton
+                  type="submit"
+                  aria-label="Send message"
+                  icon={<FiSend />}
+                  colorScheme="blue"
+                  isLoading={isLoading}
+                  isDisabled={!input.trim() || isLoading || !selectedDoc}
+                  size="lg"
+                  borderRadius="xl"
+                  variant="solid"
+                />
+              </HStack>
+            </VStack>
           </Box>
         </Box>
       </Box>

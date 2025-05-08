@@ -20,12 +20,13 @@ import {
 import { FiExternalLink, FiRefreshCcw, FiDownload, FiCheck, FiBell } from 'react-icons/fi'
 import { useState, useEffect, useCallback } from 'react'
 
-const UpdateItem = ({ update, onMarkRead }) => {
+const UpdateItem = ({ update, onMarkRead, onSelect, isSelected }) => {
   const bgColor = useColorModeValue('gray.50', 'gray.700')
   const [isMarking, setIsMarking] = useState(false)
   
-  const handleMarkRead = async () => {
+  const handleMarkRead = async (e) => {
     try {
+      e.stopPropagation()
       setIsMarking(true)
       await onMarkRead(update.press_release_link)
     } finally {
@@ -39,6 +40,11 @@ const UpdateItem = ({ update, onMarkRead }) => {
       bg={bgColor}
       borderRadius="md"
       _hover={{ bg: useColorModeValue('gray.100', 'gray.600') }}
+      cursor="pointer"
+      onClick={() => onSelect(update)}
+      position="relative"
+      border={isSelected ? "2px solid" : "none"}
+      borderColor="blue.500"
     >
       <VStack align="stretch" spacing={2}>
         <Flex justify="space-between" align="start" gap={2}>
@@ -70,6 +76,7 @@ const UpdateItem = ({ update, onMarkRead }) => {
             display="inline-flex"
             alignItems="center"
             gap={1}
+            onClick={(e) => e.stopPropagation()}
           >
             View <FiExternalLink />
           </Link>
@@ -82,9 +89,15 @@ const UpdateItem = ({ update, onMarkRead }) => {
               display="inline-flex"
               alignItems="center"
               gap={1}
+              onClick={(e) => e.stopPropagation()}
             >
               PDF <FiDownload />
             </Link>
+          )}
+          {update.doc_id && (
+            <Badge colorScheme="green" fontSize="xs">
+              Chatbot Ready
+            </Badge>
           )}
         </Flex>
       </VStack>
@@ -92,7 +105,7 @@ const UpdateItem = ({ update, onMarkRead }) => {
   )
 }
 
-const Sidebar = () => {
+const Sidebar = ({ onDocumentSelect, selectedDoc }) => {
   const [updates, setUpdates] = useState({ new: [], previous: [] })
   const [isLoading, setIsLoading] = useState(false)
   const [hasNewUpdates, setHasNewUpdates] = useState(false)
@@ -105,6 +118,13 @@ const Sidebar = () => {
       const response = await fetch('/api/updates')
       if (!response.ok) throw new Error('Failed to fetch updates')
       const data = await response.json()
+      
+      console.log('Web scraping data received:', {
+        status: data.status,
+        totalUpdates: data.updates.length,
+        sampleUpdate: data.updates[0],
+        updateFields: data.updates[0] ? Object.keys(data.updates[0]) : []
+      })
       
       if (data.status === 'success' && Array.isArray(data.updates)) {
         // Split updates based on is_new flag
@@ -135,15 +155,21 @@ const Sidebar = () => {
     }
   }, [toast])
 
-  // Initial fetch and poll for updates every 5 minutes
+  // Initial fetch and poll for updates
   useEffect(() => {
     fetchUpdates()
     const interval = setInterval(async () => {
       // Check for new updates
       try {
-        const response = await fetch('/api/updates/check')
+        const response = await fetch('/api/verify-compliance')
         if (!response.ok) throw new Error('Failed to check updates')
         const data = await response.json()
+        
+        console.log('New updates check result:', {
+          status: data.status,
+          newUpdatesCount: data.updates.length,
+          newUpdates: data.updates
+        })
         
         if (data.status === 'success' && data.updates.length > 0) {
           // If new updates found, refresh the full list
@@ -254,6 +280,8 @@ const Sidebar = () => {
                     key={index} 
                     update={update}
                     onMarkRead={handleMarkRead}
+                    onSelect={onDocumentSelect}
+                    isSelected={selectedDoc?.press_release_link === update.press_release_link}
                   />
                 ))
               )}
@@ -272,6 +300,8 @@ const Sidebar = () => {
                     key={index} 
                     update={update}
                     onMarkRead={handleMarkRead}
+                    onSelect={onDocumentSelect}
+                    isSelected={selectedDoc?.press_release_link === update.press_release_link}
                   />
                 ))
               )}
