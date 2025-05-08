@@ -1,43 +1,42 @@
-import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom'
-import { ChakraProvider, Box, Flex, VStack, Heading, Text } from '@chakra-ui/react'
-import DocumentUpload from './components/DocumentUpload'
-import ResultsList from './components/ResultsList'
-import ImplementationPlan from './components/ImplementationPlan'
-import ComplianceVerification from './components/ComplianceVerification'
+import { BrowserRouter as Router, Routes, Route } from 'react-router-dom'
+import { ChakraProvider, Box } from '@chakra-ui/react'
+import { ClerkProvider, SignIn, SignUp, SignedIn, SignedOut, RedirectToSignIn } from '@clerk/clerk-react'
 import Navigation from './components/Navigation'
+import ChatInterface from './components/ChatInterface'
+
+const clerkPubKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
 
 function App() {
   return (
-    <ChakraProvider>
-      <Router>
-        <Box minH="100vh" bg="gray.50">
-          <Navigation />
-          
-          <Box maxW="1200px" mx="auto" p={6}>
-            <Routes>
-              <Route path="/" element={
-                <VStack spacing={8} align="stretch">
-                  <Heading>RBI Compliance Automation System</Heading>
-                  <DocumentUpload />
-                  <ResultsList />
-                </VStack>
-              } />
-              
-              <Route path="/plan/:id" element={<ImplementationPlan />} />
-              <Route path="/verify/:id" element={<ComplianceVerification />} />
-              
-              <Route path="*" element={
-                <Box textAlign="center" py={10}>
-                  <Heading size="xl">404: Page Not Found</Heading>
-                  <Text mt={4}>The page you're looking for doesn't exist.</Text>
-                  <Link to="/">Return Home</Link>
-                </Box>
-              } />
-            </Routes>
+    <ClerkProvider publishableKey={clerkPubKey}>
+      <ChakraProvider>
+        <Router>
+          <Box minH="100vh" display="flex" flexDirection="column">
+            <Navigation />
+            <Box flex="1" display="flex" flexDirection="column">
+              <Routes>
+                <Route path="/sign-in/*" element={<SignIn routing="path" path="/sign-in" />} />
+                <Route path="/sign-up/*" element={<SignUp routing="path" path="/sign-up" />} />
+                
+                <Route
+                  path="/"
+                  element={
+                    <>
+                      <SignedIn>
+                        <ChatInterface />
+                      </SignedIn>
+                      <SignedOut>
+                        <RedirectToSignIn />
+                      </SignedOut>
+                    </>
+                  }
+                />
+              </Routes>
+            </Box>
           </Box>
-        </Box>
-      </Router>
-    </ChakraProvider>
+        </Router>
+      </ChakraProvider>
+    </ClerkProvider>
   )
 }
 

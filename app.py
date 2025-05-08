@@ -36,6 +36,50 @@ class ComplianceAutomationSystem:
         # Initialize workflow orchestrator
         self.orchestrator = WorkflowOrchestrator(self.config)
         
+        # Initialize chat context
+        self.chat_context = []
+    
+    async def process_chat_message(self, message: str) -> str:
+        """Process a chat message and return the response"""
+        try:
+            logger.info("Processing chat message")
+            
+            # Add user message to context
+            self.chat_context.append({
+                "role": "user",
+                "content": message
+            })
+            
+            # Create workflow state for the chat
+            state = self.orchestrator.create_initial_state()
+            state["messages"] = self.chat_context
+            state["current_task"] = json.dumps({
+                "task": "process_chat",
+                "message": message
+            })
+            
+            # Run workflow to process the message
+            result = await self.orchestrator.run(state)
+            
+            # Extract assistant's response
+            response = result["messages"][-1]["content"]
+            
+            # Add assistant's response to context
+            self.chat_context.append({
+                "role": "assistant",
+                "content": response
+            })
+            
+            # Keep context window manageable (last 10 messages)
+            if len(self.chat_context) > 20:
+                self.chat_context = self.chat_context[-20:]
+            
+            return response
+            
+        except Exception as e:
+            logger.error(f"Error processing chat message: {str(e)}")
+            return "I apologize, but I encountered an error processing your message. Please try again."
+    
     async def process_regulatory_update(self, document_path: str) -> Dict[str, Any]:
         """Process a new regulatory update document"""
         try:

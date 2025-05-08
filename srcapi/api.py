@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import FastAPI, HTTPException, UploadFile, File, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Dict, Any, List
@@ -6,6 +6,7 @@ import uvicorn
 import sys
 import os
 from pathlib import Path
+from fastapi.security import OAuth2PasswordBearer
 
 # Add parent directory to path to import from src
 sys.path.append(str(Path(__file__).parent.parent))
@@ -39,6 +40,12 @@ class ProcessResponse(BaseModel):
     implementation_plan: Dict[str, Any] = None
     compliance_status: Dict[str, Any] = None
     error: str = None
+
+class ChatRequest(BaseModel):
+    message: str
+
+class ChatResponse(BaseModel):
+    response: str
 
 @app.post("/process-document", response_model=ProcessResponse)
 async def process_document(file: UploadFile = File(...)):
@@ -106,6 +113,17 @@ async def list_results():
                     })
         
         return sorted(results, key=lambda x: x["timestamp"], reverse=True)
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/chat", response_model=ChatResponse)
+async def chat_endpoint(request: ChatRequest):
+    """Handle chat interactions with the compliance system"""
+    try:
+        # Process the message through the compliance system
+        response = await compliance_system.process_chat_message(request.message)
+        return ChatResponse(response=response)
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

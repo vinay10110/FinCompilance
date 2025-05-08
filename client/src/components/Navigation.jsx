@@ -1,9 +1,11 @@
-import { Box, Flex, Button, useColorModeValue } from '@chakra-ui/react'
-import { Link as RouterLink } from 'react-router-dom'
+import { Box, Flex, Text, useColorModeValue } from '@chakra-ui/react'
+import { SignedIn, SignedOut, useClerk, UserButton } from '@clerk/clerk-react'
+import { Button } from '@chakra-ui/react'
 
 const Navigation = () => {
   const bgColor = useColorModeValue('white', 'gray.800')
   const borderColor = useColorModeValue('gray.200', 'gray.700')
+  const { openSignIn } = useClerk()
 
   return (
     <Box
@@ -23,24 +25,19 @@ const Navigation = () => {
         align="center"
         justify="space-between"
       >
-        <RouterLink to="/">
-          <Button variant="ghost" fontSize="lg" fontWeight="bold">
-            RBI Compliance System
-          </Button>
-        </RouterLink>
+        <Text fontSize="xl" fontWeight="bold">
+          AI Compliance Assistant
+        </Text>
 
-        <Flex gap={4}>
-          <RouterLink to="/">
-            <Button variant="ghost">Dashboard</Button>
-          </RouterLink>
-          <Button
-            as="a"
-            href="/api/docs"
-            target="_blank"
-            variant="ghost"
-          >
-            API Docs
-          </Button>
+        <Flex gap={4} align="center">
+          <SignedIn>
+            <UserButton afterSignOutUrl="/"/>
+          </SignedIn>
+          <SignedOut>
+            <Button onClick={() => openSignIn()} colorScheme="blue">
+              Sign In
+            </Button>
+          </SignedOut>
         </Flex>
       </Flex>
     </Box>
