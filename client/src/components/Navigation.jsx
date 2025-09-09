@@ -1,11 +1,22 @@
-import { Box, Flex, Text, useColorModeValue } from '@chakra-ui/react'
-import { SignedIn, SignedOut, useClerk, UserButton } from '@clerk/clerk-react'
+import { Box, Flex, Text, useColorModeValue, HStack, IconButton, Tooltip } from '@chakra-ui/react'
+import { SignedIn, SignedOut, useClerk, UserButton, useUser } from '@clerk/clerk-react'
 import { Button } from '@chakra-ui/react'
+import { FiSettings, FiArrowLeft } from 'react-icons/fi'
+import { useState } from 'react'
+import { useNavigate, useLocation } from 'react-router-dom'
+import WorkflowDialog from './WorkflowDialog'
 
 const Navigation = () => {
   const bgColor = useColorModeValue('white', 'gray.800')
   const borderColor = useColorModeValue('gray.200', 'gray.700')
   const { openSignIn } = useClerk()
+  const { user } = useUser()
+  const navigate = useNavigate()
+  const location = useLocation()
+  const [isWorkflowDialogOpen, setIsWorkflowDialogOpen] = useState(false)
+  
+  // Check if we're on a workflow page
+  const isOnWorkflowPage = location.pathname.startsWith('/workflows/')
 
   return (
     <Box
@@ -28,12 +39,32 @@ const Navigation = () => {
         align="center"
         justify="space-between"
       >
-        <Text fontSize="xl" fontWeight="bold">
-          AI Compliance Assistant
-        </Text>
+        <HStack spacing={3}>
+          {isOnWorkflowPage && (
+            <Tooltip label="Back to Home">
+              <IconButton
+                icon={<FiArrowLeft />}
+                variant="ghost"
+                onClick={() => navigate('/')}
+                aria-label="Back to home"
+                size="sm"
+              />
+            </Tooltip>
+          )}
+          <Text fontSize="xl" fontWeight="bold">
+            AI Compliance Assistant
+          </Text>
+        </HStack>
 
-        <Flex gap={4} align="center">
+        <HStack spacing={4}>
           <SignedIn>
+            <Button
+              variant="ghost"
+              leftIcon={<FiSettings />}
+              onClick={() => setIsWorkflowDialogOpen(true)}
+            >
+              Workflows
+            </Button>
             <UserButton afterSignOutUrl="/"/>
           </SignedIn>
           <SignedOut>
@@ -41,8 +72,15 @@ const Navigation = () => {
               Sign In
             </Button>
           </SignedOut>
-        </Flex>
+        </HStack>
       </Flex>
+
+      {/* Workflow Dialog */}
+      <WorkflowDialog
+        isOpen={isWorkflowDialogOpen}
+        onClose={() => setIsWorkflowDialogOpen(false)}
+        userId={user?.id || "default_user"}
+      />
     </Box>
   )
 }

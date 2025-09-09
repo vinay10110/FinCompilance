@@ -1,337 +1,589 @@
-from flask import Flask, jsonify, request
-from flask_cors import CORS
-from datetime import datetime
-import json
-import os
-import threading
-import time
-from webscrapper import scrape_rbi, save_to_local
-from langchain_core.messages import HumanMessage, AIMessage
-from vectorizer import process_and_store_pdf, query_collection, get_collection_name
-from langchain_ollama.chat_models import ChatOllama
-from notifications import send_update_notification
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from typing import Optional, List, Dict, Any
+from vectorizer import process_and_store_pdf
 from dotenv import load_dotenv
-from sqlconnector import db  # Import the database connector
+from neon_database import db
+from llm import ask_doc_question
+from circulars_scrapper import scrape_and_save_circulars
+from playwright_scrapper import scrape_and_save_press_releases
+from workflow_agent import ask_workflow_question
 
 # Load environment variables
 load_dotenv()
 
-app = Flask(__name__)
-CORS(app)
+# Pydantic models for request/response validation
+class VectorizeRequest(BaseModel):
+    doc_id: str
+    pdf_link: str
+
+class MessageRequest(BaseModel):
+    message: str
+    role: str
+    user_id: Optional[str] = "default_user"
+
+class ProcessMessageRequest(BaseModel):
+    message: str
+    doc_id: Optional[str] = None
+
+class StandardResponse(BaseModel):
+    status: str
+    message: Optional[str] = None
+    updates: Optional[List[Dict[str, Any]]] = None
+    response: Optional[Dict[str, Any]] = None
+    messages: Optional[List[Dict[str, Any]]] = None
+    data: Optional[Dict[str, Any]] = None
+
+# Workflow-related models
+class CreateWorkflowRequest(BaseModel):
+    user_id: str
+    name: Optional[str] = None
+    description: Optional[str] = None
+
+class AddDocumentToWorkflowRequest(BaseModel):
+    doc_type: str  # 'press_release' | 'circular'
+    doc_id: str
+
+class WorkflowChatRequest(BaseModel):
+    query: str
+    doc_ids: List[str]
+    doc_titles: List[str]
+
+class WorkflowChatHistoryRequest(BaseModel):
+    workflow_id: str
+    user_id: str
+    limit: Optional[int] = 50
+
+class SaveWorkflowChatMessageRequest(BaseModel):
+    workflow_id: str
+    user_id: str
+    role: str  # 'user' or 'assistant'
+    content: str
+    document_data: Optional[Dict[str, Any]] = None
 
 # Initialize database connection and tables
 try:
     print("Initializing database connection...")
     if db.connect():
         print("Database connection established")
-        # Explicitly create tables
-        db.create_tables()
-        print("Database tables created/verified")
 except Exception as e:
     print(f"❌ Error initializing database: {str(e)}")
 
-# Initialize Ollama LLM
-llm = ChatOllama(
-    model="llama3.2:3b",
-    base_url="http://localhost:11434",
-    temperature=0.7
+
+app = FastAPI()
+
+# -----------------------
+# Middleware
+# -----------------------
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
-# Global variable to track when we last scraped
-last_scrape_time = 0
-SCRAPE_INTERVAL = 300  # 5 minutes in seconds
-
-def load_rbi_updates():
-    """Load RBI updates from the JSON file"""
-    try:
-        if os.path.exists('rbi_press_releases.json'):
-            with open('rbi_press_releases.json', 'r') as f:
-                return json.load(f)
-        return []
-    except Exception as e:
-        print(f"Error loading RBI updates: {str(e)}")
-        return []
-
-def background_scraper():
-    """Background task to continuously scrape RBI website"""
-    global last_scrape_time
-    while True:
-        try:
-            print("🔍 Checking for new press releases...")
-            new_entries = scrape_rbi()
-            if new_entries:
-                print(f"✅ Found {len(new_entries)} new press release(s). Saving...")
-                save_to_local(new_entries)
-                # Send notifications for new updates
-                send_update_notification(new_entries)
-            last_scrape_time = datetime.now().timestamp()
-            time.sleep(SCRAPE_INTERVAL)
-        except Exception as e:
-            print(f"Error in background scraper: {str(e)}")
-            time.sleep(60)  # Wait a minute before retrying if there's an error
-
-def check_for_updates():
-    """Check for new updates and return them"""
-    global last_scrape_time
-    current_time = datetime.now().timestamp()
-    
-    # If it's been more than 5 minutes since last scrape, scrape now
-    if current_time - last_scrape_time > SCRAPE_INTERVAL:
-        try:
-            new_entries = scrape_rbi()
-            if new_entries:
-                save_to_local(new_entries)
-                # Send notifications for new updates
-                send_update_notification(new_entries)
-            last_scrape_time = current_time
-        except Exception as e:
-            print(f"Error checking for updates: {str(e)}")
-
-@app.route('/updates', methods=['GET'])
-def get_updates():
+@app.get("/get_updates", response_model=StandardResponse)
+async def get_updates():
     """
-    Route to fetch RBI press release updates
+    Route to fetch RBI press release updates from Neon DB
     Returns a list of updates with their details
     """
     try:
-        # Check for new updates before returning
-        check_for_updates()
-        
-        # Get the latest data
-        updates = load_rbi_updates()
-        return jsonify({
-            "status": "success",
-            "updates": updates
-        })
+        updates = db.get_latest_press_releases()
+        print(f"Found {len(updates)} updates from database")
+        return StandardResponse(
+            status="success",
+            updates=updates
+        )
     except Exception as e:
-        return jsonify({
-            "status": "error",
-            "message": f"Failed to fetch updates: {str(e)}"
-        }), 500
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to fetch updates: {str(e)}"
+        )
 
-@app.route('/vectorize', methods=['POST'])
-def vectorize_document():
+
+@app.post("/vectorize", response_model=StandardResponse)
+async def vectorize_document(data: VectorizeRequest):
     """
     Process and store a document in ChromaDB when user clicks Pull & Chat
     """
     try:
-        data = request.json
-        doc_id = data.get('doc_id')
-        pdf_link = data.get('pdf_link')
+        process_and_store_pdf(data.pdf_link, data.doc_id)
         
-        if not doc_id or not pdf_link:
-            return jsonify({
-                'status': 'error',
-                'message': 'Missing doc_id or pdf_link'
-            }), 400
-        
-        # Process and store the document using doc_id as collection name
-        collection_name = process_and_store_pdf(pdf_link=pdf_link, doc_id=doc_id)
-        
-        return jsonify({
-            'status': 'success',
-            'message': 'Document processed and stored successfully'
-        })
+        return StandardResponse(
+            status="success",
+            message="Document processed and stored successfully"
+        )
         
     except Exception as e:
-        return jsonify({
-            'status': 'error',
-            'message': f'Failed to process document: {str(e)}'
-        }), 500
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to process document: {str(e)}"
+        )
 
-@app.route('/chat', methods=['POST'])
-def chat():
+@app.post("/save_message", response_model=StandardResponse)
+async def save_message(data: MessageRequest):
     """
-    Handle chat interactions with the LLM and store chat history
+    Save a chat message to the database
     """
     try:
-        print("\n" + "="*50)
-        print("� POST /chat endpoint called")
-        print("⏰ Timestamp:", datetime.now().isoformat())
+        db.save_message(data.user_id, data.role, data.message)
         
-        data = request.json
-        print(f"📝 Received request data:")
-        print(json.dumps(data, indent=2))
-
-        if not data or 'message' not in data:
-            print("❌ Error: No message provided in request")
-            return jsonify({
-                'status': 'error',
-                'message': 'No message provided'
-            }), 400
-            
-        user_message = data['message']
-        doc_id = data.get('doc_id')
-        user_id = data.get('user_id', 'default_user')  # Use a default user if not provided
+        return StandardResponse(
+            status="success",
+            message="Message saved successfully"
+        )
         
-        print("\n📨 Message Details:")
-        print(f"� User ID: {user_id}")
-        print(f"💬 Message: {user_message}")
-        print(f"� Document ID: {doc_id}")
-        print("-"*30)
-        
-        if not doc_id:
-            print("❌ Error: No doc_id provided")
-            return jsonify({
-                'status': 'error',
-                'message': 'No doc_id provided'
-            }), 400
-
-        # Ensure database connection
-        if not db.connection or not db.connection.is_connected():
-            db.connect()
-        print("\n💾 Database Operations:")
-        # Store user message
-        try:
-            db.save_message(user_id, "user", user_message)
-            print(f"✅ Stored user message for {user_id}")
-            print(f"   Type: user")
-            print(f"   Content: {user_message[:100]}...")
-        except Exception as e:
-            print(f"❌ Error storing user message: {str(e)}")
-            raise
-        
-        # Get relevant context from ChromaDB using doc_id as collection name
-        print("\n🔍 Retrieving context from ChromaDB:")
-        collection_name = get_collection_name(doc_id)
-        print(f"📚 Using collection: {collection_name}")
-        try:
-            results = query_collection(
-                collection_name=collection_name,
-                query=user_message,
-                n_results=3
-            )
-            context = "\n\n".join(results["documents"][0])
-            
-        except Exception as e:
-            print(f"❌ Error retrieving context: {str(e)}")
-            return jsonify({
-                'status': 'error',
-                'message': f'Error retrieving document context: {str(e)}'
-            }), 500
-
-        try:
-            prompt = f"""Based on the following context, please answer the user's question.
-            If the answer cannot be found in the context, say so.
-
-            Context:
-            {context}
-
-            User Question: {user_message}"""
-            
-            response = llm.invoke(prompt)
-            response_content = response.content            # Store AI response
-            print("\n💾 Storing AI response:")
-            try:
-                db.save_message(user_id, "assistant", response_content)
-                print(f"✅ Stored AI response for {user_id}")
-                print(f"   Type: assistant")
-                print(f"   Content: {response_content[:100]}...")
-            except Exception as e:
-                print(f"❌ Error storing AI response: {str(e)}")
-                raise
-
-            # Get chat history for the user
-            print("\n📚 Fetching recent chat history:")
-            chat_history = db.get_user_chat_history(user_id, limit=10)  # Get last 10 messages
-            print(f"✅ Retrieved {len(chat_history)} recent messages")
-            print("="*50)
-
-            return jsonify({
-                'status': 'success',
-                'response': {
-                    'content': response_content,
-                    'context': context,
-                    'chat_history': chat_history
-                }
-            })
-        except Exception as e:
-            print(f"❌ Error generating AI response: {str(e)}")
-            import traceback
-            print(f"Detailed error: {traceback.format_exc()}")
-            return jsonify({
-                'status': 'error',
-                'message': f'Error generating response: {str(e)}'
-            }), 500
-            
     except Exception as e:
-        print(f"❌ Unexpected error: {str(e)}")
-        import traceback
-        print(f"Detailed error: {traceback.format_exc()}")
-        return jsonify({
-            'status': 'error',
-            'message': f'Failed to get response: {str(e)}'
-        }), 500
+        print(f"❌ Error saving message: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to save message: {str(e)}"
+        )
 
-@app.route('/getchats', methods=['GET'])
-def get_chat_history():
+@app.post("/process_message", response_model=StandardResponse)
+async def process_message(data: ProcessMessageRequest):
+    """
+    Process user message and generate AI response using document context
+    """
+    try:
+        if not data.doc_id:
+            raise HTTPException(
+                status_code=400,
+                detail="No doc_id provided"
+            )
+
+        # Generate AI response
+        try:
+            response_content = ask_doc_question(data.message, data.doc_id)
+            print(response_content)
+            return StandardResponse(
+                status="success",
+                response={
+                    "content": response_content
+                }
+            )
+            
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error generating response: {str(e)}"
+            )
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to process message: {str(e)}"
+        )
+
+
+@app.get("/get_circulars", response_model=StandardResponse)
+async def get_circulars(limit: int = 50):
+    """
+    Get RBI master circulars from database
+    Returns latest circulars with category information
+    """
+    try:
+        circulars = db.get_latest_circulars()
+        return StandardResponse(
+            status="success",
+            message=f"Retrieved {len(circulars)} circulars",
+            updates=circulars
+        )
+        
+    except Exception as e:
+        print(f"❌ Error retrieving circulars: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to retrieve circulars: {str(e)}"
+        )
+
+
+@app.get("/getchats", response_model=StandardResponse)
+async def get_chat_history(user_id: str = "default_user"):
     """
     Get chat history for a user
     Returns all previous chats between the user and AI
     """
     try:
-        print("\n" + "="*50)
-        print("📱 GET /getchats endpoint called")
+        chat_history = db.get_user_chat_history(user_id, limit=100)  
         
-        # Get user_id from query parameters
-        user_id = request.args.get('user_id', 'default_user')
-        print(f"� User ID from request: {user_id}")
-        
-        # Ensure database connection
-        if not db.connection or not db.connection.is_connected():
-            print("🔄 Reconnecting to database...")
-            db.connect()
-            print("✅ Database connection established")
-        
-        # Get chat history for the user (all messages)
-        print(f"🔍 Fetching chat history for user: {user_id}")
-        chat_history = db.get_user_chat_history(user_id, limit=100)  # Get last 100 messages
-        print(f"📊 Found {len(chat_history)} messages in history")
-        
-        # Format the chat history for the response
-        formatted_history = []
-        for msg in chat_history:
-            formatted_message = {
-                'role': msg['message_type'],
-                'content': msg['content'],
-                'timestamp': msg['timestamp'].isoformat() if msg['timestamp'] else None
-            }
-            formatted_history.append(formatted_message)
-            print(f"💬 Message: {msg['message_type']} at {msg['timestamp']}: {msg['content'][:50]}...")
-        
-        print(f"✅ Successfully formatted {len(formatted_history)} messages")
-        print("="*50)
-          # Format messages to match frontend expectations
-        messages = []
-        for msg in formatted_history:
-            messages.append({
-                'content': msg['content'],
-                'message_type': msg['role'],  # Convert role back to message_type
-                'isUser': msg['role'] == 'user'  # Add isUser flag
+        formatted_messages = []
+        for chat in chat_history:
+            formatted_messages.append({
+                "content": chat.get("content", ""),
+                "isUser": chat.get("role") == "user",
+                "message_type": chat.get("role", "assistant"),
+                "timestamp": chat.get("created_at", "")
             })
         
-        print(f"🔄 Sending {len(messages)} formatted messages to frontend")
-        
-        return jsonify({
-            'status': 'success',
-            'messages': messages  # Changed to 'messages' to match frontend expectation
-        })
+        return StandardResponse(
+            status="success",
+            message=f"Retrieved {len(formatted_messages)} chat messages",
+            messages=formatted_messages
+        )
         
     except Exception as e:
         print(f"❌ Error retrieving chat history: {str(e)}")
         import traceback
         print(f"Detailed error: {traceback.format_exc()}")
-        return jsonify({
-            'status': 'error',
-            'message': f'Failed to retrieve chat history: {str(e)}'
-        }), 500
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to retrieve chat history: {str(e)}"
+        )
+
+
+# Workflow routes
+@app.post("/workflows", response_model=StandardResponse)
+async def create_workflow(data: CreateWorkflowRequest):
+    """
+    Create a new empty workflow
+    """
+    try:
+        workflow = db.create_workflow(data.user_id, data.name, data.description)
         
+        return StandardResponse(
+            status="success",
+            message="Workflow created successfully",
+            data={"workflow": workflow}
+        )
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to create workflow: {str(e)}"
+        )
+
+@app.post("/workflows/{workflow_id}/documents", response_model=StandardResponse)
+async def add_document_to_workflow(workflow_id: str, data: AddDocumentToWorkflowRequest):
+    """
+    Add a document to an existing workflow (vectorizes first, then adds)
+    """
+    try:
+        print(f"🔍 Adding document to workflow - workflow_id: {workflow_id}, doc_type: {data.doc_type}, doc_id: {data.doc_id}")
+        
+        # Convert doc_id hash to database primary key ID
+        if data.doc_type == 'press_release':
+            db_id = db.get_press_release_id_by_doc_id(data.doc_id)
+            print(f"📄 Press release lookup - doc_id: {data.doc_id} -> db_id: {db_id}")
+            
+        elif data.doc_type == 'circular':
+            db_id = db.get_circular_id_by_doc_id(data.doc_id)
+            print(f"📄 Circular lookup - doc_id: {data.doc_id} -> db_id: {db_id}")
+
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid doc_type: {data.doc_type}. Must be 'press_release' or 'circular'"
+            )
+        
+        if db_id is None:
+            print(f"❌ Document not found with doc_id: {data.doc_id}")
+            raise HTTPException(
+                status_code=404,
+                detail=f"Document not found with doc_id: {data.doc_id}"
+            )
+        
+        # Get document details to extract PDF link for vectorization
+        document_details = db.get_document_by_type_and_id(data.doc_type, db_id)
+        if not document_details:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Document details not found for {data.doc_type} with id: {db_id}"
+            )
+        
+        pdf_link = document_details.get('pdf_link')
+        if not pdf_link:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Document does not have a PDF link for vectorization"
+            )
+        
+        # Vectorize the document first
+        print(f"🔄 Vectorizing document before adding to workflow...")
+        try:
+            process_and_store_pdf(pdf_link, data.doc_id)
+            print(f"✅ Document vectorized successfully")
+        except Exception as e:
+            print(f"❌ Vectorization failed: {str(e)}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to vectorize document: {str(e)}"
+            )
+        
+        # Now add to workflow
+        print(f"✅ Found document with db_id: {db_id}, adding to workflow...")
+        document = db.add_document_to_workflow(workflow_id, data.doc_type, db_id)
+        
+        if document is None:
+            print("⚠️ Document was already in workflow (conflict ignored)")
+            return StandardResponse(
+                status="success",
+                message="Document already exists in workflow",
+                data={"document": None}
+            )
+        
+        print(f"✅ Successfully vectorized and added document to workflow: {document}")
+        return StandardResponse(
+            status="success",
+            message="Document vectorized and added to workflow successfully",
+            data={"document": document}
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Unexpected error in add_document_to_workflow: {str(e)}")
+        import traceback
+        print(f"Full traceback: {traceback.format_exc()}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to add document to workflow: {str(e)}"
+        )
+
+@app.get("/workflows/{workflow_id}", response_model=StandardResponse)
+async def get_workflow(workflow_id: str):
+    """
+    Get workflow with its linked documents
+    """
+    try:
+        workflow = db.get_workflow_with_documents(workflow_id)
+        
+        if not workflow:
+            raise HTTPException(
+                status_code=404,
+                detail="Workflow not found"
+            )
+        
+        return StandardResponse(
+            status="success",
+            message="Workflow retrieved successfully",
+            data={"workflow": workflow}
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to retrieve workflow: {str(e)}"
+        )
+
+@app.get("/workflows", response_model=StandardResponse)
+async def get_user_workflows(user_id: str, limit: int = 50):
+    """
+    Get all workflows for a user
+    """
+    try:
+        workflows = db.get_user_workflows(user_id, limit)
+        
+        return StandardResponse(
+            status="success",
+            message=f"Retrieved {len(workflows)} workflows",
+            data={"workflows": workflows}
+        )
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to retrieve workflows: {str(e)}"
+        )
+
+@app.get("/documents/{doc_type}/{doc_id}", response_model=StandardResponse)
+async def get_document_details(doc_type: str, doc_id: int):
+    """
+    Get document details by doc_type and database ID
+    """
+    try:
+        if doc_type not in ['press_release', 'circular']:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid doc_type: {doc_type}. Must be 'press_release' or 'circular'"
+            )
+        
+        document = db.get_document_by_type_and_id(doc_type, doc_id)
+        
+        if not document:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Document not found with doc_type: {doc_type} and id: {doc_id}"
+            )
+        
+        return StandardResponse(
+            status="success",
+            message="Document retrieved successfully",
+            data={"document": document}
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to retrieve document: {str(e)}"
+        )
+
+@app.post("/workflows/{workflow_id}/chat", response_model=StandardResponse)
+async def workflow_chat(workflow_id: str, data: WorkflowChatRequest, user_id: str):
+    """
+    Process workflow chat message using workflow-specific documents and save to database
+    """
+    try:
+        print(f"🔍 Workflow chat - workflow_id: {workflow_id}, user_id: {user_id}")
+        print(f"📄 Query: {data.query}")
+        print(f"📄 Doc IDs: {data.doc_ids}")
+        print(f"📄 Doc Titles: {data.doc_titles}")
+        
+        if not data.doc_ids or not data.doc_titles:
+            raise HTTPException(
+                status_code=400,
+                detail="No documents provided for workflow chat"
+            )
+        
+        if len(data.doc_ids) != len(data.doc_titles):
+            raise HTTPException(
+                status_code=400,
+                detail="Mismatch between doc_ids and doc_titles count"
+            )
+        
+        # Save user message to database
+        print(f"💾 Saving user message to database...")
+        db.save_workflow_chat_message(
+            workflow_id=workflow_id,
+            user_id=user_id,
+            role="user",
+            content=data.query,
+            document_data=None
+        )
+        
+        # Call workflow agent
+        print(f"🤖 Calling workflow agent...")
+        response = ask_workflow_question(data.query, data.doc_ids, data.doc_titles)
+        
+        # Save assistant response to database
+        print(f"💾 Saving assistant response to database...")
+        db.save_workflow_chat_message(
+            workflow_id=workflow_id,
+            user_id=user_id,
+            role="assistant",
+            content=response["answer_text"],
+            document_data=response.get("document")
+        )
+        
+        print(f"✅ Workflow chat completed and saved to database")
+        return StandardResponse(
+            status="success",
+            message="Workflow chat response generated successfully",
+            response={
+                "content": response["answer_text"],
+                "document": response.get("document")
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Unexpected error in workflow_chat: {str(e)}")
+        import traceback
+        print(f"Full traceback: {traceback.format_exc()}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to process workflow chat: {str(e)}"
+        )
+
+@app.get("/workflows/{workflow_id}/chat/history", response_model=StandardResponse)
+async def get_workflow_chat_history(workflow_id: str, user_id: str, limit: int = 50):
+    """
+    Get chat history for a specific workflow and user
+    """
+    try:
+        print(f"🔍 Getting chat history for workflow {workflow_id}, user {user_id}")
+        
+        chat_history = db.get_workflow_chat_history(workflow_id, user_id, limit)
+        
+        # Convert to frontend format
+        messages = []
+        for msg in chat_history:
+            message = {
+                "id": msg["id"],
+                "type": msg["role"],
+                "content": msg["content"],
+                "timestamp": msg["created_at"].isoformat() if msg["created_at"] else None,
+                "document": msg["document_data"] if msg["document_data"] else None
+            }
+            messages.append(message)
+        
+        print(f"✅ Retrieved {len(messages)} chat messages")
+        return StandardResponse(
+            status="success",
+            message=f"Retrieved {len(messages)} chat messages",
+            data={"messages": messages}
+        )
+        
+    except Exception as e:
+        print(f"❌ Error getting workflow chat history: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get chat history: {str(e)}"
+        )
+
+@app.post("/workflows/{workflow_id}/chat/save", response_model=StandardResponse)
+async def save_workflow_chat_message(workflow_id: str, data: SaveWorkflowChatMessageRequest):
+    """
+    Save a chat message for a specific workflow
+    """
+    try:
+        print(f"💾 Saving chat message for workflow {workflow_id}")
+        
+        saved_message = db.save_workflow_chat_message(
+            workflow_id=workflow_id,
+            user_id=data.user_id,
+            role=data.role,
+            content=data.content,
+            document_data=data.document_data
+        )
+        
+        print(f"✅ Chat message saved with ID: {saved_message['id']}")
+        return StandardResponse(
+            status="success",
+            message="Chat message saved successfully",
+            data={"message": saved_message}
+        )
+        
+    except Exception as e:
+        print(f"❌ Error saving workflow chat message: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to save chat message: {str(e)}"
+        )
+
+@app.delete("/workflows/{workflow_id}/chat/clear", response_model=StandardResponse)
+async def clear_workflow_chat_history(workflow_id: str, user_id: str):
+    """
+    Clear chat history for a specific workflow and user
+    """
+    try:
+        print(f"🗑️ Clearing chat history for workflow {workflow_id}, user {user_id}")
+        
+        deleted_count = db.clear_workflow_chat_history(workflow_id, user_id)
+        
+        print(f"✅ Cleared {deleted_count} chat messages")
+        return StandardResponse(
+            status="success",
+            message=f"Cleared {deleted_count} chat messages"
+        )
+        
+    except Exception as e:
+        print(f"❌ Error clearing workflow chat history: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to clear chat history: {str(e)}"
+        )
 
 if __name__ == '__main__':
-    import time
-    # Start the background scraper in a separate thread
-    scraper_thread = threading.Thread(target=background_scraper, daemon=True)
-    scraper_thread.start()
-    
-    # Run the Flask app
-    app.run(debug=True, port=5000)
+    import uvicorn
+    uvicorn.run("app:app", host="127.0.0.1", port=5000, reload=True)

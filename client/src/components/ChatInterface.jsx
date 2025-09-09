@@ -1,26 +1,27 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useUser } from "@clerk/clerk-react"
 import {
+  Flex,
   Box,
   VStack,
   HStack,
-  IconButton,
   Text,
-  useColorModeValue,
-  Avatar,
-  Flex,
-  Textarea,
-  Spinner,
+  Input,
   Button,
   useToast,
+  Spinner,
+  useColorModeValue,
   Modal,
   ModalOverlay,
   ModalContent,
   ModalHeader,
+  ModalFooter,
   ModalBody,
   ModalCloseButton,
-  ModalFooter,
+  Textarea,
+  Avatar,
   Badge,
+  IconButton,
 } from '@chakra-ui/react'
 import { FiSend, FiDownload } from 'react-icons/fi'
 import Sidebar from './Sidebar'
@@ -145,13 +146,14 @@ const ChatInterface = () => {
   const inputBgColor = useColorModeValue('white', 'gray.800')
   const loadingBgColor = useColorModeValue('gray.50', 'gray.800')
   const [showPullDialog, setShowPullDialog] = useState(false)
-  const [pendingDoc, setPendingDoc] = useState(null);
+  const [pendingDoc, setPendingDoc] = useState(null)
+  const [showWorkflowDialog, setShowWorkflowDialog] = useState(false);
   
   const fetchChatHistory = useCallback(async () => {
     if (!user) return;
     
     try {
-      const response = await fetch(`http://localhost:5000/getchats?user_id=${encodeURIComponent(user.id)}`, {
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/getchats?user_id=${encodeURIComponent(user.id)}`, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
@@ -164,15 +166,15 @@ const ChatInterface = () => {
       
       if (!data.messages || data.messages.length === 0) {
         setMessages([{
-          content: "No previous chat history found. How can I help you today?",
+          content: "Hello! I'm your AI assistant. I can help you understand RBI documents and create summaries or reports. Select a document to get started!",
           isUser: false
         }]);
         return;
-      }      // Replace initial message with chat history in correct order
-      const sortedMessages = [...data.messages].reverse(); // Reverse to show oldest first
+      }      
+      const sortedMessages = [...data.messages].reverse(); 
       setMessages(sortedMessages.map(msg => ({
         content: msg.content,
-        isUser: msg.isUser || msg.message_type === 'user'  // Handle both formats
+        isUser: msg.isUser
       })));
     } catch (error) {
       console.error('Error fetching chat history:', error);
@@ -224,7 +226,7 @@ const ChatInterface = () => {
     setIsLoading(true)
     try {
       // Call /vectorize to process the document
-      const vectorizeResponse = await fetch('http://localhost:5000/vectorize', {
+      const vectorizeResponse = await fetch(`${import.meta.env.VITE_API_URL}/vectorize`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -266,6 +268,48 @@ const ChatInterface = () => {
     setPendingDoc(null)
   }
 
+  const handleCreateWorkflow = () => {
+    setShowPullDialog(false)
+    setShowWorkflowDialog(true)
+  }
+
+  const handleCancelWorkflow = () => {
+    setShowWorkflowDialog(false)
+    setPendingDoc(null)
+  }
+
+  const handleCreateNewWorkflow = () => {
+    // TODO: Implement workflow creation logic
+    console.log('Creating workflow for:', pendingDoc?.title)
+    setShowWorkflowDialog(false)
+    setPendingDoc(null)
+    toast({
+      title: 'Workflow Created',
+      description: 'Your workflow has been created successfully.',
+      status: 'success',
+      duration: 3000,
+      isClosable: true,
+    })
+  }
+
+  const saveMessage = async (message, role) => {
+    try {
+      await fetch(`${import.meta.env.VITE_API_URL}/save_message`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          message: message,
+          role: role,
+          user_id: user.id
+        }),
+      });
+    } catch (error) {
+      console.error('Error saving message:', error);
+    }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!input.trim()) return;
@@ -282,20 +326,24 @@ const ChatInterface = () => {
     }
 
     const userMessage = { content: input, isUser: true };
+    const currentInput = input;
     setMessages(prev => [...prev, userMessage]);
     setInput('');
     setIsLoading(true);
 
     try {
-        const response = await fetch('http://localhost:5000/chat', {
+      // Save user message first
+      await saveMessage(currentInput, 'user');
+
+      // Process message and get AI response
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/process_message`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ 
-          message: input,
-          doc_id: selectedDoc?.doc_id,
-          user_id: user.id
+          message: currentInput,
+          doc_id: selectedDoc?.doc_id
         }),
       });
       
@@ -307,13 +355,21 @@ const ChatInterface = () => {
         setDocumentContent(data.document.content);
         setDocumentTitle(data.document.title || 'Generated Document');
         setIsDocumentEditorOpen(true);
+        
+        const documentMessage = 'I have generated a document for you. You can view and download it.';
+        await saveMessage(documentMessage, 'assistant');
+        
         setMessages(prev => [...prev, {
-          content: 'I have generated a document for you. You can view and download it.',
+          content: documentMessage,
           isUser: false,
           isDocument: true
-        }]);      } else {
+        }]);
+      } else {
+        const aiResponse = data.response.content;
+        await saveMessage(aiResponse, 'assistant');
+        
         setMessages(prev => [...prev, {
-          content: data.response.content,
+          content: aiResponse,
           isUser: false,
           context: data.response.context
         }]);
@@ -327,10 +383,14 @@ const ChatInterface = () => {
         duration: 5000,
         isClosable: true,
       });
+      
+      const errorMessage = 'Sorry, I encountered an error. Please try again.';
+      await saveMessage(errorMessage, 'assistant');
+      
       setMessages(prev => [
         ...prev,
         {
-          content: 'Sorry, I encountered an error. Please try again.',
+          content: errorMessage,
           isUser: false,
         },
       ]);
@@ -342,6 +402,7 @@ const ChatInterface = () => {
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }
+
   useEffect(() => {
     if (user) {
       fetchChatHistory();
@@ -565,6 +626,31 @@ const ChatInterface = () => {
             </Button>
             <Button colorScheme="blue" onClick={handlePullAndChat} isLoading={isLoading}>
               Pull & Chat
+            </Button>
+          </ModalFooter>
+        </ModalContent>
+      </Modal>
+
+      {/* Workflow Creation Dialog */}
+      <Modal isOpen={showWorkflowDialog} onClose={handleCancelWorkflow}>
+        <ModalOverlay />
+        <ModalContent>
+          <ModalHeader>Create Workflow</ModalHeader>
+          <ModalCloseButton />
+          <ModalBody>
+            <Text mb={4}>
+              Create a workflow for: <strong>{pendingDoc?.title}</strong>
+            </Text>
+            <Text fontSize="sm" color="gray.500">
+              Workflows help you automate document processing and analysis tasks.
+            </Text>
+          </ModalBody>
+          <ModalFooter>
+            <Button variant="ghost" mr={3} onClick={handleCancelWorkflow}>
+              Cancel
+            </Button>
+            <Button colorScheme="green" onClick={handleCreateNewWorkflow} leftIcon={<span>+</span>}>
+              Create a workflow
             </Button>
           </ModalFooter>
         </ModalContent>

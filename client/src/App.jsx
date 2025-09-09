@@ -3,6 +3,7 @@ import { ChakraProvider, Box } from '@chakra-ui/react'
 import { ClerkProvider, SignIn, SignUp, SignedIn, SignedOut, RedirectToSignIn } from '@clerk/clerk-react'
 import Navigation from './components/Navigation'
 import ChatInterface from './components/ChatInterface'
+import WorkflowsPage from './pages/WorkflowsPage'
 
 const clerkPubKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
 
@@ -30,6 +31,21 @@ function App() {
                   </>
                 }
               />
+              
+              <Route
+                path="/workflows/:workflowId"
+                element={
+                  <>
+                    <SignedIn>
+                      <WorkflowsPage />
+                    </SignedIn>
+                    <SignedOut>
+                      <RedirectToSignIn />
+                    </SignedOut>
+                  </>
+                }
+              />
+        
             </Routes>
           </Box>
         </Router>
