@@ -10,3 +10,7 @@ pinecone
 langchain_openai
 langchain
 langgraph
+playwright
+psycopg2-binary
+pdfplumber
+python-docx

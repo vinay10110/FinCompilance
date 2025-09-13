@@ -1,3 +1,10 @@
+import asyncio
+import sys
+
+# Fix for Windows event loop policy - use SelectorEventLoop for Playwright compatibility
+if sys.platform.startswith("win"):
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -79,6 +86,64 @@ except Exception as e:
 
 
 app = FastAPI()
+
+# -----------------------
+# Background Scraping Functions
+# -----------------------
+async def background_scraper():
+    """Background task to periodically scrape RBI data"""
+    while True:
+        try:
+            print("🔄 Starting background scraping...")
+            
+            # Scrape circulars
+            print("📄 Scraping RBI circulars...")
+            circulars_result = await scrape_and_save_circulars()
+            print(f"✅ Found {len(circulars_result)} new circulars")
+            
+            # Scrape press releases
+            print("📰 Scraping RBI press releases...")
+            press_releases_result = await scrape_and_save_press_releases()
+            print(f"✅ Found {len(press_releases_result)} new press releases")
+            
+            print("✅ Background scraping completed successfully")
+            
+        except Exception as e:
+            print(f"❌ Error in background scraping: {str(e)}")
+            import traceback
+            print(f"Detailed error: {traceback.format_exc()}")
+        
+        # Wait 5 minutes before next scrape
+        await asyncio.sleep(300)  # 300 seconds = 5 minutes
+
+@app.on_event("startup")
+async def startup_event():
+    """Run initial scraping and start background scraper on startup"""
+    print("🚀 Application starting up...")
+    
+    try:
+        # Run initial scraping
+        print("🔄 Running initial data scraping...")
+        
+        # Initial scrape of circulars
+        print("📄 Initial scraping of RBI circulars...")
+        circulars_result = await scrape_and_save_circulars()
+        print(f"✅ Initial scrape: Found {len(circulars_result)} new circulars")
+        
+        # Initial scrape of press releases
+        print("📰 Initial scraping of RBI press releases...")
+        press_releases_result = await scrape_and_save_press_releases()
+        print(f"✅ Initial scrape: Found {len(press_releases_result)} new press releases")
+        
+        # Schedule background scraper in the existing event loop
+        print("🔄 Scheduling background scraper...")
+        asyncio.create_task(background_scraper())
+        print("✅ Background scraper scheduled successfully")
+        
+    except Exception as e:
+        print(f"❌ Error during startup scraping: {str(e)}")
+        import traceback
+        print(f"Detailed error: {traceback.format_exc()}")
 
 # -----------------------
 # Middleware
