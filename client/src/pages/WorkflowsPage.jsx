@@ -70,6 +70,14 @@ const WorkflowsPage = () => {
     setIsRightSidebarOpen(!isRightSidebarOpen)
   }
 
+  const handleDocumentsUpdate = () => {
+    // This will trigger a re-fetch of documents in WorkflowRightSidebar
+    // by updating the key or triggering a refresh
+    if (selectedWorkflow) {
+      fetchWorkflow(workflowId)
+    }
+  }
+
   if (!workflowId) {
     return (
       <Box minH="100vh" bg={bgColor} pt="80px">
@@ -149,6 +157,7 @@ const WorkflowsPage = () => {
         <Sidebar 
           onDocumentSelect={handleDocumentSelect}
           selectedDoc={selectedDoc}
+          onDocumentsUpdate={handleDocumentsUpdate}
         />
 
         {/* Main Chat Interface */}

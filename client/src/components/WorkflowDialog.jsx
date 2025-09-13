@@ -26,10 +26,16 @@ import {
   AlertIcon,
   AlertTitle,
   AlertDescription,
+  AlertDialog,
+  AlertDialogBody,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogContent,
+  AlertDialogOverlay,
 } from '@chakra-ui/react'
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { FiPlus, FiFolder, FiCalendar, FiUser } from 'react-icons/fi'
+import { FiPlus, FiFolder, FiCalendar, FiUser, FiTrash2 } from 'react-icons/fi'
 
 const WorkflowDialog = ({ isOpen, onClose, userId = "default_user" }) => {
   const [workflows, setWorkflows] = useState([])
@@ -40,6 +46,9 @@ const WorkflowDialog = ({ isOpen, onClose, userId = "default_user" }) => {
     name: '',
     description: ''
   })
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [workflowToDelete, setWorkflowToDelete] = useState(null)
+  const [deleteLoading, setDeleteLoading] = useState(false)
   
   const toast = useToast()
   const navigate = useNavigate()
@@ -132,6 +141,65 @@ const WorkflowDialog = ({ isOpen, onClose, userId = "default_user" }) => {
     } finally {
       setIsCreating(false)
     }
+  }
+
+  // Delete workflow
+  const deleteWorkflow = async () => {
+    if (!workflowToDelete) return
+    
+    setDeleteLoading(true)
+    try {
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/workflows/${workflowToDelete.id}`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          user_id: userId
+        })
+      })
+
+      const data = await response.json()
+      
+      if (response.ok && data.status === 'success') {
+        // Remove workflow from local state
+        setWorkflows(prev => prev.filter(w => w.id !== workflowToDelete.id))
+        
+        toast({
+          title: 'Success',
+          description: 'Workflow deleted successfully',
+          status: 'success',
+          duration: 3000,
+          isClosable: true,
+        })
+      } else {
+        throw new Error(data.detail || 'Failed to delete workflow')
+      }
+    } catch (error) {
+      console.error('Error deleting workflow:', error)
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to delete workflow',
+        status: 'error',
+        duration: 5000,
+        isClosable: true,
+      })
+    } finally {
+      setDeleteLoading(false)
+      setDeleteDialogOpen(false)
+      setWorkflowToDelete(null)
+    }
+  }
+
+  const handleDeleteClick = (workflow, e) => {
+    e.stopPropagation()
+    setWorkflowToDelete(workflow)
+    setDeleteDialogOpen(true)
+  }
+
+  const handleDeleteCancel = () => {
+    setDeleteDialogOpen(false)
+    setWorkflowToDelete(null)
   }
 
   // Load workflows when dialog opens
@@ -278,14 +346,24 @@ const WorkflowDialog = ({ isOpen, onClose, userId = "default_user" }) => {
                     >
                       <VStack align="stretch" spacing={2}>
                         <Flex justify="space-between" align="center">
-                          <Text fontWeight="medium" fontSize="sm" noOfLines={1}>
+                          <Text fontWeight="medium" fontSize="sm" noOfLines={1} flex="1">
                             {workflow.name || 'Untitled Workflow'}
                           </Text>
-                          <HStack spacing={1}>
-                            <FiCalendar size={12} />
-                            <Text fontSize="xs" color="gray.500">
-                              {formatDate(workflow.created_at)}
-                            </Text>
+                          <HStack spacing={2}>
+                            <HStack spacing={1}>
+                              <FiCalendar size={12} />
+                              <Text fontSize="xs" color="gray.500">
+                                {formatDate(workflow.created_at)}
+                              </Text>
+                            </HStack>
+                            <IconButton
+                              icon={<FiTrash2 />}
+                              size="xs"
+                              variant="ghost"
+                              colorScheme="red"
+                              onClick={(e) => handleDeleteClick(workflow, e)}
+                              aria-label="Delete workflow"
+                            />
                           </HStack>
                         </Flex>
                         
@@ -319,6 +397,42 @@ const WorkflowDialog = ({ isOpen, onClose, userId = "default_user" }) => {
           <Button onClick={onClose}>Close</Button>
         </ModalFooter>
       </ModalContent>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog
+        isOpen={deleteDialogOpen}
+        onClose={handleDeleteCancel}
+        isCentered
+      >
+        <AlertDialogOverlay>
+          <AlertDialogContent>
+            <AlertDialogHeader fontSize="lg" fontWeight="bold">
+              Delete Workflow
+            </AlertDialogHeader>
+
+            <AlertDialogBody>
+              Are you sure you want to delete "{workflowToDelete?.name || 'this workflow'}"? 
+              This will permanently delete the workflow and all associated documents and chat history. 
+              This action cannot be undone.
+            </AlertDialogBody>
+
+            <AlertDialogFooter>
+              <Button onClick={handleDeleteCancel}>
+                Cancel
+              </Button>
+              <Button 
+                colorScheme="red" 
+                onClick={deleteWorkflow} 
+                ml={3}
+                isLoading={deleteLoading}
+                loadingText="Deleting..."
+              >
+                Delete
+              </Button>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialogOverlay>
+      </AlertDialog>
     </Modal>
   )
 }

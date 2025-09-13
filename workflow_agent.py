@@ -84,7 +84,7 @@ def ask_workflow_question(user_question: str, doc_ids: list, doc_titles: list):
     """
 
     # Build document catalog
-    doc_catalog = "\n".join([f"- {doc_id}: {title}" for doc_id, title in zip(doc_ids, doc_titles)])
+    doc_catalog = "\n".join([f"{doc_id}: {title}" for doc_id, title in zip(doc_ids, doc_titles)])
     print(doc_catalog)
     workflow_system_prompt = f"""
 You are FinCompliance AI, an expert in RBI regulations.

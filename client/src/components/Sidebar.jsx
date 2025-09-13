@@ -35,7 +35,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useLocation, useParams } from 'react-router-dom'
 import { useUser } from '@clerk/clerk-react'
 
-const UpdateItem = ({ update, onSelect, isSelected, type = 'press_release', isOnWorkflowPage, onAddToWorkflow }) => {
+const UpdateItem = ({ update, onSelect, isSelected, type = 'press_release', isOnWorkflowPage, onAddToWorkflow, isAddingToWorkflow }) => {
   const bgColor = useColorModeValue('gray.50', 'gray.700')
   const { isOpen, onOpen, onClose } = useDisclosure()
   
@@ -146,7 +146,13 @@ const UpdateItem = ({ update, onSelect, isSelected, type = 'press_release', isOn
             <Button variant="ghost" mr={3} onClick={onClose}>
               Cancel
             </Button>
-            <Button colorScheme="blue" leftIcon={<FiPlus />} onClick={handleAddToWorkflow}>
+            <Button 
+              colorScheme="blue" 
+              leftIcon={<FiPlus />} 
+              onClick={handleAddToWorkflow}
+              isLoading={isAddingToWorkflow}
+              loadingText="Vectorizing..."
+            >
               Add to Workflow
             </Button>
           </ModalFooter>
@@ -156,7 +162,7 @@ const UpdateItem = ({ update, onSelect, isSelected, type = 'press_release', isOn
   )
 }
 
-const Sidebar = ({ onDocumentSelect, selectedDoc }) => {
+const Sidebar = ({ onDocumentSelect, selectedDoc, onDocumentsUpdate }) => {
   const [updates, setUpdates] = useState({ new: [], previous: [] })
   const [circulars, setCirculars] = useState([])
   const [selectedCategory, setSelectedCategory] = useState('all')
@@ -164,6 +170,7 @@ const Sidebar = ({ onDocumentSelect, selectedDoc }) => {
   const [isLoading, setIsLoading] = useState(false)
   const [isLoadingCirculars, setIsLoadingCirculars] = useState(false)
   const [hasNewUpdates, setHasNewUpdates] = useState(false)
+  const [isAddingToWorkflow, setIsAddingToWorkflow] = useState(false)
   const borderColor = useColorModeValue('gray.200', 'gray.700')
   const toast = useToast()
   const location = useLocation()
@@ -186,6 +193,7 @@ const Sidebar = ({ onDocumentSelect, selectedDoc }) => {
       return
     }
 
+    setIsAddingToWorkflow(true)
     try {
       const response = await fetch(`${import.meta.env.VITE_API_URL}/workflows/${workflowId}/documents`, {
         method: 'POST',
@@ -208,6 +216,11 @@ const Sidebar = ({ onDocumentSelect, selectedDoc }) => {
           duration: 4000,
           isClosable: true,
         })
+        
+        // Update workflow documents immediately
+        if (onDocumentsUpdate) {
+          onDocumentsUpdate()
+        }
       } else {
         throw new Error(data.message || 'Failed to add document to workflow')
       }
@@ -220,6 +233,8 @@ const Sidebar = ({ onDocumentSelect, selectedDoc }) => {
         duration: 5000,
         isClosable: true,
       })
+    } finally {
+      setIsAddingToWorkflow(false)
     }
   }
   
@@ -428,6 +443,7 @@ const Sidebar = ({ onDocumentSelect, selectedDoc }) => {
                       type="circular"
                       isOnWorkflowPage={isOnWorkflowPage}
                       onAddToWorkflow={handleAddToWorkflow}
+                      isAddingToWorkflow={isAddingToWorkflow}
                     />
                   ))
                 )}
@@ -466,6 +482,7 @@ const Sidebar = ({ onDocumentSelect, selectedDoc }) => {
                           type="press_release"
                           isOnWorkflowPage={isOnWorkflowPage}
                           onAddToWorkflow={handleAddToWorkflow}
+                          isAddingToWorkflow={isAddingToWorkflow}
                         />
                       ))
                     )}
@@ -488,6 +505,7 @@ const Sidebar = ({ onDocumentSelect, selectedDoc }) => {
                           type="press_release"
                           isOnWorkflowPage={isOnWorkflowPage}
                           onAddToWorkflow={handleAddToWorkflow}
+                          isAddingToWorkflow={isAddingToWorkflow}
                         />
                       ))
                     )}

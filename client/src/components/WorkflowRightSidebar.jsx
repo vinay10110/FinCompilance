@@ -21,7 +21,13 @@ import {
   InputLeftElement,
   Collapse,
   useDisclosure,
-  Link
+  Link,
+  AlertDialog,
+  AlertDialogBody,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogContent,
+  AlertDialogOverlay
 } from '@chakra-ui/react'
 import { 
   FiX, 
@@ -34,7 +40,8 @@ import {
   FiChevronRight,
   FiUpload,
   FiExternalLink,
-  FiDownload
+  FiDownload,
+  FiTrash2
 } from 'react-icons/fi'
 import { useUser } from '@clerk/clerk-react'
 
@@ -46,10 +53,19 @@ const WorkflowRightSidebar = ({
   onToggle,
   onDocumentsUpdate 
 }) => {
-  const [workflowDocuments, setWorkflowDocuments] = useState([])
-  const [isLoading, setIsLoading] = useState(false)
-  const [searchTerm, setSearchTerm] = useState('')
   const { user } = useUser()
+  const [documents, setDocuments] = useState([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState(null)
+  const [searchTerm, setSearchTerm] = useState('')
+  const [expandedSections, setExpandedSections] = useState({
+    pdfs: true,
+    circulars: true,
+    regulations: true
+  })
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [documentToDelete, setDocumentToDelete] = useState(null)
+  const [deleteLoading, setDeleteLoading] = useState(false)
   const { isOpen: isDocumentsOpen, onToggle: onDocumentsToggle } = useDisclosure({ defaultIsOpen: true })
 
   const bgColor = useColorModeValue('white', 'gray.800')
@@ -67,13 +83,13 @@ const WorkflowRightSidebar = ({
   // Update parent component when documents change
   useEffect(() => {
     if (onDocumentsUpdate) {
-      onDocumentsUpdate(workflowDocuments)
+      onDocumentsUpdate(documents)
     }
-  }, [workflowDocuments, onDocumentsUpdate])
+  }, [documents, onDocumentsUpdate])
 
   const fetchWorkflowDocuments = async () => {
     try {
-      setIsLoading(true)
+      setLoading(true)
       const response = await fetch(
         `${import.meta.env.VITE_API_URL}/workflows/${selectedWorkflow.id}`
       )
@@ -97,7 +113,8 @@ const WorkflowRightSidebar = ({
                   return {
                     ...docData.data.document,
                     workflow_doc_type: workflowDoc.doc_type,
-                    added_at: workflowDoc.added_at
+                    added_at: workflowDoc.added_at,
+                    workflow_doc_id: workflowDoc.doc_id  // Store the original integer doc_id for deletion
                   }
                 }
               }
@@ -110,7 +127,8 @@ const WorkflowRightSidebar = ({
                 doc_type: workflowDoc.doc_type,
                 workflow_doc_type: workflowDoc.doc_type,
                 added_at: workflowDoc.added_at,
-                date_published: workflowDoc.added_at
+                date_published: workflowDoc.added_at,
+                workflow_doc_id: workflowDoc.doc_id  // Store the original integer doc_id for deletion
               }
             } catch (error) {
               console.error('Error fetching document details:', error)
@@ -121,29 +139,29 @@ const WorkflowRightSidebar = ({
                 doc_type: workflowDoc.doc_type,
                 workflow_doc_type: workflowDoc.doc_type,
                 added_at: workflowDoc.added_at,
-                date_published: workflowDoc.added_at
+                date_published: workflowDoc.added_at,
+                workflow_doc_id: workflowDoc.doc_id  // Store the original integer doc_id for deletion
               }
             }
           })
         )
         
-        setWorkflowDocuments(documentsWithDetails)
+        setDocuments(documentsWithDetails)
         // Update parent component with documents for chat interface
         if (onDocumentsUpdate) {
           onDocumentsUpdate(documentsWithDetails)
         }
-        console.log('✅ Workflow documents loaded:', documentsWithDetails)
       } else {
         console.error('Failed to fetch workflow documents:', data.message)
       }
     } catch (error) {
       console.error('❌ Error fetching workflow documents:', error)
     } finally {
-      setIsLoading(false)
+      setLoading(false)
     }
   }
 
-  const filteredDocuments = workflowDocuments.filter(doc =>
+  const filteredDocuments = documents.filter(doc =>
     doc.title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
     doc.doc_type?.toLowerCase().includes(searchTerm.toLowerCase()) ||
     doc.doc_id?.toLowerCase().includes(searchTerm.toLowerCase())
@@ -160,6 +178,63 @@ const WorkflowRightSidebar = ({
 
   const handleDocumentClick = (document) => {
     onDocumentSelect(document)
+  }
+
+  const handleDeleteClick = (document, e) => {
+    e.stopPropagation()
+    setDocumentToDelete(document)
+    setDeleteDialogOpen(true)
+  }
+
+  const handleDeleteConfirm = async () => {
+    if (!documentToDelete) return
+    
+    setDeleteLoading(true)
+    try {
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/workflows/${selectedWorkflow.id}/documents`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          doc_type: documentToDelete.workflow_doc_type,
+          doc_id: documentToDelete.workflow_doc_id
+        })
+      })
+
+      const data = await response.json()
+      
+      if (response.ok && data.status === 'success') {
+        // Remove document from local state
+        setDocuments(prev => prev.filter(doc => doc.doc_id !== documentToDelete.doc_id))
+        
+        // Call parent callback to update documents
+        if (onDocumentsUpdate) {
+          onDocumentsUpdate()
+        }
+        
+        // Clear selected document if it was deleted
+        if (selectedDoc?.doc_id === documentToDelete.doc_id) {
+          onDocumentSelect(null)
+        }
+        
+      } else {
+        console.error('Failed to delete document:', data.message)
+        setError(`Failed to delete document: ${data.message}`)
+      }
+    } catch (error) {
+      console.error('❌ Error deleting document:', error)
+      setError('Failed to delete document. Please try again.')
+    } finally {
+      setDeleteLoading(false)
+      setDeleteDialogOpen(false)
+      setDocumentToDelete(null)
+    }
+  }
+
+  const handleDeleteCancel = () => {
+    setDeleteDialogOpen(false)
+    setDocumentToDelete(null)
   }
 
   if (!isOpen) {
@@ -190,15 +265,13 @@ const WorkflowRightSidebar = ({
             Workflow Documents
           </Text>
         </HStack>
-        <Tooltip label="Close sidebar">
-          <IconButton
-            icon={<FiX />}
-            size="sm"
-            variant="ghost"
-            onClick={onToggle}
-            aria-label="Close sidebar"
-          />
-        </Tooltip>
+        <IconButton
+          icon={<FiX />}
+          size="sm"
+          variant="ghost"
+          onClick={onToggle}
+          aria-label="Close sidebar"
+        />
       </Flex>
 
       {/* Workflow Info */}
@@ -264,7 +337,7 @@ const WorkflowRightSidebar = ({
           {/* Documents List */}
           <Collapse in={isDocumentsOpen}>
             <VStack spacing={0} align="stretch">
-              {isLoading ? (
+              {loading ? (
                 <Flex justify="center" p={8}>
                   <Spinner size="md" />
                 </Flex>
@@ -305,9 +378,19 @@ const WorkflowRightSidebar = ({
                     onClick={() => handleDocumentClick(document)}
                   >
                     <VStack align="stretch" spacing={2}>
-                      <Text fontSize="sm" fontWeight="medium" noOfLines={2}>
-                        {document.title || `${document.doc_type} Document`}
-                      </Text>
+                      <HStack justify="space-between" align="start">
+                        <Text fontSize="sm" fontWeight="medium" noOfLines={2} flex="1">
+                          {document.title || `${document.doc_type} Document`}
+                        </Text>
+                        <IconButton
+                          icon={<FiTrash2 />}
+                          size="xs"
+                          variant="ghost"
+                          colorScheme="red"
+                          onClick={(e) => handleDeleteClick(document, e)}
+                          aria-label="Delete document"
+                        />
+                      </HStack>
                       
                       {document.workflow_doc_type === 'circular' && document.category && (
                         <Badge colorScheme="blue" fontSize="xs" w="fit-content">
@@ -378,6 +461,41 @@ const WorkflowRightSidebar = ({
           </Collapse>
         </VStack>
       </Box>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog
+        isOpen={deleteDialogOpen}
+        onClose={handleDeleteCancel}
+        isCentered
+      >
+        <AlertDialogOverlay>
+          <AlertDialogContent>
+            <AlertDialogHeader fontSize="lg" fontWeight="bold">
+              Delete Document
+            </AlertDialogHeader>
+
+            <AlertDialogBody>
+              Are you sure you want to remove "{documentToDelete?.title || 'this document'}" from the workflow? 
+              This action cannot be undone.
+            </AlertDialogBody>
+
+            <AlertDialogFooter>
+              <Button onClick={handleDeleteCancel}>
+                Cancel
+              </Button>
+              <Button 
+                colorScheme="red" 
+                onClick={handleDeleteConfirm} 
+                ml={3}
+                isLoading={deleteLoading}
+                loadingText="Deleting..."
+              >
+                Delete
+              </Button>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialogOverlay>
+      </AlertDialog>
 
     </Box>
   )

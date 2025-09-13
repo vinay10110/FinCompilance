@@ -5,6 +5,7 @@ from typing import Optional, List, Dict, Any
 from vectorizer import process_and_store_pdf
 from dotenv import load_dotenv
 from neon_database import db
+import traceback
 from llm import ask_doc_question
 from circulars_scrapper import scrape_and_save_circulars
 from playwright_scrapper import scrape_and_save_press_releases
@@ -62,6 +63,13 @@ class SaveWorkflowChatMessageRequest(BaseModel):
     content: str
     document_data: Optional[Dict[str, Any]] = None
 
+class RemoveDocumentFromWorkflowRequest(BaseModel):
+    doc_type: str  # 'press_release' | 'circular'
+    doc_id: int  # integer ID from workflow_documents table
+
+class DeleteWorkflowRequest(BaseModel):
+    user_id: str  # Clerk user ID
+
 # Initialize database connection and tables
 try:
     print("Initializing database connection...")
@@ -92,7 +100,6 @@ async def get_updates():
     """
     try:
         updates = db.get_latest_press_releases()
-        print(f"Found {len(updates)} updates from database")
         return StandardResponse(
             status="success",
             updates=updates
@@ -158,7 +165,6 @@ async def process_message(data: ProcessMessageRequest):
         # Generate AI response
         try:
             response_content = ask_doc_question(data.message, data.doc_id)
-            print(response_content)
             return StandardResponse(
                 status="success",
                 response={
@@ -228,7 +234,6 @@ async def get_chat_history(user_id: str = "default_user"):
         )
         
     except Exception as e:
-        print(f"❌ Error retrieving chat history: {str(e)}")
         import traceback
         print(f"Detailed error: {traceback.format_exc()}")
         raise HTTPException(
@@ -264,16 +269,13 @@ async def add_document_to_workflow(workflow_id: str, data: AddDocumentToWorkflow
     Add a document to an existing workflow (vectorizes first, then adds)
     """
     try:
-        print(f"🔍 Adding document to workflow - workflow_id: {workflow_id}, doc_type: {data.doc_type}, doc_id: {data.doc_id}")
         
         # Convert doc_id hash to database primary key ID
         if data.doc_type == 'press_release':
             db_id = db.get_press_release_id_by_doc_id(data.doc_id)
-            print(f"📄 Press release lookup - doc_id: {data.doc_id} -> db_id: {db_id}")
             
         elif data.doc_type == 'circular':
             db_id = db.get_circular_id_by_doc_id(data.doc_id)
-            print(f"📄 Circular lookup - doc_id: {data.doc_id} -> db_id: {db_id}")
 
         else:
             raise HTTPException(
@@ -304,30 +306,24 @@ async def add_document_to_workflow(workflow_id: str, data: AddDocumentToWorkflow
             )
         
         # Vectorize the document first
-        print(f"🔄 Vectorizing document before adding to workflow...")
         try:
             process_and_store_pdf(pdf_link, data.doc_id)
-            print(f"✅ Document vectorized successfully")
         except Exception as e:
-            print(f"❌ Vectorization failed: {str(e)}")
             raise HTTPException(
                 status_code=500,
                 detail=f"Failed to vectorize document: {str(e)}"
             )
         
         # Now add to workflow
-        print(f"✅ Found document with db_id: {db_id}, adding to workflow...")
         document = db.add_document_to_workflow(workflow_id, data.doc_type, db_id)
         
         if document is None:
-            print("⚠️ Document was already in workflow (conflict ignored)")
             return StandardResponse(
                 status="success",
                 message="Document already exists in workflow",
                 data={"document": None}
             )
         
-        print(f"✅ Successfully vectorized and added document to workflow: {document}")
         return StandardResponse(
             status="success",
             message="Document vectorized and added to workflow successfully",
@@ -337,8 +333,6 @@ async def add_document_to_workflow(workflow_id: str, data: AddDocumentToWorkflow
     except HTTPException:
         raise
     except Exception as e:
-        print(f"❌ Unexpected error in add_document_to_workflow: {str(e)}")
-        import traceback
         print(f"Full traceback: {traceback.format_exc()}")
         raise HTTPException(
             status_code=500,
@@ -487,8 +481,6 @@ async def workflow_chat(workflow_id: str, data: WorkflowChatRequest, user_id: st
     except HTTPException:
         raise
     except Exception as e:
-        print(f"❌ Unexpected error in workflow_chat: {str(e)}")
-        import traceback
         print(f"Full traceback: {traceback.format_exc()}")
         raise HTTPException(
             status_code=500,
@@ -500,9 +492,7 @@ async def get_workflow_chat_history(workflow_id: str, user_id: str, limit: int =
     """
     Get chat history for a specific workflow and user
     """
-    try:
-        print(f"🔍 Getting chat history for workflow {workflow_id}, user {user_id}")
-        
+    try:        
         chat_history = db.get_workflow_chat_history(workflow_id, user_id, limit)
         
         # Convert to frontend format
@@ -516,8 +506,6 @@ async def get_workflow_chat_history(workflow_id: str, user_id: str, limit: int =
                 "document": msg["document_data"] if msg["document_data"] else None
             }
             messages.append(message)
-        
-        print(f"✅ Retrieved {len(messages)} chat messages")
         return StandardResponse(
             status="success",
             message=f"Retrieved {len(messages)} chat messages",
@@ -525,7 +513,6 @@ async def get_workflow_chat_history(workflow_id: str, user_id: str, limit: int =
         )
         
     except Exception as e:
-        print(f"❌ Error getting workflow chat history: {str(e)}")
         raise HTTPException(
             status_code=500,
             detail=f"Failed to get chat history: {str(e)}"
@@ -536,9 +523,7 @@ async def save_workflow_chat_message(workflow_id: str, data: SaveWorkflowChatMes
     """
     Save a chat message for a specific workflow
     """
-    try:
-        print(f"💾 Saving chat message for workflow {workflow_id}")
-        
+    try:       
         saved_message = db.save_workflow_chat_message(
             workflow_id=workflow_id,
             user_id=data.user_id,
@@ -546,8 +531,6 @@ async def save_workflow_chat_message(workflow_id: str, data: SaveWorkflowChatMes
             content=data.content,
             document_data=data.document_data
         )
-        
-        print(f"✅ Chat message saved with ID: {saved_message['id']}")
         return StandardResponse(
             status="success",
             message="Chat message saved successfully",
@@ -555,7 +538,6 @@ async def save_workflow_chat_message(workflow_id: str, data: SaveWorkflowChatMes
         )
         
     except Exception as e:
-        print(f"❌ Error saving workflow chat message: {str(e)}")
         raise HTTPException(
             status_code=500,
             detail=f"Failed to save chat message: {str(e)}"
@@ -567,21 +549,68 @@ async def clear_workflow_chat_history(workflow_id: str, user_id: str):
     Clear chat history for a specific workflow and user
     """
     try:
-        print(f"🗑️ Clearing chat history for workflow {workflow_id}, user {user_id}")
-        
         deleted_count = db.clear_workflow_chat_history(workflow_id, user_id)
         
-        print(f"✅ Cleared {deleted_count} chat messages")
         return StandardResponse(
             status="success",
             message=f"Cleared {deleted_count} chat messages"
         )
         
     except Exception as e:
-        print(f"❌ Error clearing workflow chat history: {str(e)}")
         raise HTTPException(
             status_code=500,
             detail=f"Failed to clear chat history: {str(e)}"
+        )
+
+@app.delete("/workflows/{workflow_id}/documents", response_model=StandardResponse)
+async def remove_document_from_workflow(workflow_id: str, data: RemoveDocumentFromWorkflowRequest):
+    """
+    Remove a document from a workflow
+    """
+    try:
+        success = db.remove_document_from_workflow(workflow_id, data.doc_type, data.doc_id)
+        
+        if success:
+            return StandardResponse(
+                status="success",
+                message="Document removed from workflow successfully"
+            )
+        else:
+            raise HTTPException(
+                status_code=404,
+                detail="Document not found in workflow"
+            )
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to remove document from workflow: {str(e)}"
+        )
+
+@app.delete("/workflows/{workflow_id}", response_model=StandardResponse)
+async def delete_workflow(workflow_id: str, data: DeleteWorkflowRequest):
+    """
+    Delete a workflow and all associated data
+    """
+    try:
+        success = db.delete_workflow(workflow_id, data.user_id)
+        
+        if success:
+            return StandardResponse(
+                status="success",
+                message="Workflow deleted successfully"
+            )
+        else:
+            raise HTTPException(
+                status_code=404,
+                detail="Workflow not found or you don't have permission to delete it"
+            )
+        
+    except Exception as e:
+        print(f"❌ Error deleting workflow: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to delete workflow: {str(e)}"
         )
 
 if __name__ == '__main__':

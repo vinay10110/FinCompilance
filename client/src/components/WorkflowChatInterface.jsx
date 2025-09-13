@@ -51,19 +51,46 @@ const WorkflowChatInterface = ({
     scrollToBottom()
   }, [messages])
 
-  // Initialize with welcome message when workflow is selected
+  // Load chat history when workflow is selected
   useEffect(() => {
-    if (selectedWorkflow && messages.length === 0) {
+    if (selectedWorkflow && user) {
+      loadChatHistory()
+    }
+  }, [selectedWorkflow, user])
+
+  const loadChatHistory = async () => {
+    try {
+      const response = await fetch(
+        `${import.meta.env.VITE_API_URL}/workflows/${selectedWorkflow.id}/chat/history?user_id=${user.id}&limit=50`
+      )
+      const data = await response.json()
+      
+      if (data.status === 'success' && data.data?.messages?.length > 0) {
+        setMessages(data.data.messages)
+      } else {
+        // Initialize with welcome message if no history
+        setMessages([
+          {
+            id: Date.now(),
+            type: 'assistant',
+            content: `Welcome to ${selectedWorkflow.name}! I'm here to help you analyze documents and answer questions related to this workflow. ${selectedDoc ? `Currently viewing: ${selectedDoc.title || selectedDoc.doc_type || 'Selected Document'}` : 'Select a document from the sidebar to get started.'}`,
+            timestamp: new Date().toISOString()
+          }
+        ])
+      }
+    } catch (error) {
+      console.error('Error loading chat history:', error)
+      // Fallback to welcome message
       setMessages([
         {
           id: Date.now(),
           type: 'assistant',
-          content: `Welcome to ${selectedWorkflow.name}! I'm here to help you analyze documents and answer questions related to this workflow. ${selectedDoc ? `Currently viewing: ${selectedDoc.title || selectedDoc.doc_type || 'Selected Document'}` : 'Select a document from the sidebar to get started.'}`,
+          content: `Welcome to ${selectedWorkflow.name}! I'm here to help you analyze documents and answer questions related to this workflow.`,
           timestamp: new Date().toISOString()
         }
       ])
     }
-  }, [selectedWorkflow, selectedDoc])
+  }
 
   const handleSendMessage = async () => {
     if (!inputValue.trim() || isLoading) return
@@ -88,7 +115,7 @@ const WorkflowChatInterface = ({
         throw new Error('No documents available in this workflow for chat')
       }
 
-      const response = await fetch(`${import.meta.env.VITE_API_URL}/workflows/chat`, {
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/workflows/${selectedWorkflow.id}/chat?user_id=${user?.id || 'anonymous'}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -178,14 +205,12 @@ const WorkflowChatInterface = ({
           )}
         </VStack>
         
-        <Tooltip label={isRightSidebarOpen ? 'Hide Workflow Documents' : 'Show Workflow Documents'}>
-          <IconButton
-            icon={<FiSidebar />}
-            variant="ghost"
-            onClick={onToggleRightSidebar}
-            aria-label="Toggle right sidebar"
-          />
-        </Tooltip>
+        <IconButton
+          icon={<FiSidebar />}
+          variant="ghost"
+          onClick={onToggleRightSidebar}
+          aria-label="Toggle right sidebar"
+        />
       </Flex>
 
       {/* Messages Area */}

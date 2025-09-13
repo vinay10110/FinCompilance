@@ -302,5 +302,48 @@ class Database:
             conn.rollback()
             raise
 
+    def remove_document_from_workflow(self, workflow_id, doc_type, doc_id):
+        """Remove document from workflow"""
+        conn = self.connect()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    DELETE FROM workflow_documents 
+                    WHERE workflow_id = %s AND doc_type = %s AND doc_id = %s
+                """, (workflow_id, doc_type, doc_id))
+                conn.commit()
+                return cur.rowcount > 0
+        except Exception as e:
+            print(f"❌ Error removing document from workflow: {e}")
+            conn.rollback()
+            raise
+
+    def delete_workflow(self, workflow_id, user_id):
+        """Delete a workflow and all associated data"""
+        conn = self.connect()
+        try:
+            with conn.cursor() as cur:
+                # First verify the workflow belongs to the user
+                cur.execute("""
+                    SELECT id FROM workflows 
+                    WHERE id = %s AND user_id = %s
+                """, (workflow_id, user_id))
+                
+                if not cur.fetchone():
+                    return False
+                
+                # Delete workflow (CASCADE will handle related records)
+                cur.execute("""
+                    DELETE FROM workflows 
+                    WHERE id = %s AND user_id = %s
+                """, (workflow_id, user_id))
+                
+                conn.commit()
+                return cur.rowcount > 0
+        except Exception as e:
+            print(f"❌ Error deleting workflow: {e}")
+            conn.rollback()
+            raise
+
 
 db = Database()
