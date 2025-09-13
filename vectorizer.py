@@ -35,7 +35,6 @@ def process_and_store_pdf(pdf_link: str, doc_id: str = None) -> str:
         namespace_name = get_namespace_name(doc_id)
         stats = index.describe_index_stats()
         if namespace_name in stats.get("namespaces", {}):
-            print(f"✅ Skipping: {namespace_name} already exists in Pinecone")
             return namespace_name
         headers = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -49,8 +48,6 @@ def process_and_store_pdf(pdf_link: str, doc_id: str = None) -> str:
         response.raise_for_status()
         content_type = response.headers.get("Content-Type", "")
         if "pdf" not in content_type.lower():
-            print("⚠️ Not a PDF. Content-Type:", content_type)
-            print("Preview of response:", response.text[:500])  # show first 500 chars
             return None, None
         pdf_file = BytesIO(response.content)  # Keep PDF in memory
 

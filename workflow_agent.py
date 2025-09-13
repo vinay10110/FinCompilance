@@ -49,32 +49,10 @@ def retrieve_document_content(query: str, doc_id: str, top_k: int = 5):
 
         matches = results.get("matches", [])
         context_chunks = [m["metadata"].get("text", "") for m in matches]
-        print(context_chunks)
         return "\n\n---\n\n".join(context_chunks) if context_chunks else "No relevant content found."
 
     except Exception as e:
         return f"Error retrieving document content: {e}"
-
-
-def create_document_tool(content: str, filename: str = "compliance_report.docx"):
-    """
-    Create a Word document with the given content and return Base64 for frontend download.
-    """
-    try:
-        doc = Document()
-        doc.add_heading("FinCompliance AI Report", 0)
-        doc.add_paragraph(content)
-
-        # Save to BytesIO instead of disk
-        file_stream = BytesIO()
-        doc.save(file_stream)
-        file_stream.seek(0)
-
-        encoded_doc = base64.b64encode(file_stream.read()).decode("utf-8")
-        return {"filename": filename, "content_base64": encoded_doc}
-
-    except Exception as e:
-        return {"error": str(e)}
 
 
 def ask_workflow_question(user_question: str, doc_ids: list, doc_titles: list):
@@ -83,22 +61,25 @@ def ask_workflow_question(user_question: str, doc_ids: list, doc_titles: list):
     If user asks for documentation/report, a Word file is created and returned separately.
     """
 
-    # Build document catalog
-    doc_catalog = "\n".join([f"{doc_id}: {title}" for doc_id, title in zip(doc_ids, doc_titles)])
-    print(doc_catalog)
-    workflow_system_prompt = f"""
-You are FinCompliance AI, an expert in RBI regulations.
+    # Build document catalog with actual doc_ids
+    doc_catalog_items = []
+    for doc_id, title in zip(doc_ids, doc_titles):
+        doc_catalog_items.append(f"{doc_id}: {title}")
+    
+    doc_catalog = "\n".join(doc_catalog_items)
+     
+    workflow_system_prompt = f"""You are FinCompliance AI, an RBI regulations expert.
 
-You have access to these workflow documents:
+Documents available:
 {doc_catalog}
 
-When answering user questions:
-- Decide which document(s) are relevant based on their title.
-- Call the `retrieve_document_content` tool with the chosen doc_id.
-- Use the retrieved content to provide your analysis.
-- If the user asks for a report, call the `create_document` tool.
-- Do NOT invent doc_ids; only use the ones listed.
+Instructions:
+- Choose relevant doc_id(s) based on title
+- Use retrieve_document_content tool with chosen doc_id
+- Answer user queries using retrieved content
+- Only use listed doc_ids
 """
+
 
     messages = [
         {"role": "system", "content": workflow_system_prompt},
@@ -111,11 +92,6 @@ When answering user questions:
             func=retrieve_document_content,
             name="retrieve_document_content",
             description="Retrieve content from a document using its doc_id. Input: query, doc_id."
-        ),
-        StructuredTool.from_function(
-            func=create_document_tool,
-            name="create_document",
-            description="Create a Word document report from provided content."
         )
     ]
 
@@ -124,26 +100,8 @@ When answering user questions:
 
     # Extract final LLM answer
     agent_message = response["messages"][-1].content
-    document = None
-
-    # 🔍 Look for structured tool output
-    if isinstance(agent_message, dict) and "filename" in agent_message and "content_base64" in agent_message:
-        # Pure document response
-        document = agent_message
-        agent_message = None
-    else:
-        # Sometimes LLM may mix JSON into text → try regex parse
-        import re, json
-        doc_match = re.search(r'\{[^}]*"filename"[^}]*"content_base64"[^}]*\}', str(agent_message))
-        if doc_match:
-            try:
-                document = json.loads(doc_match.group())
-                agent_message = str(agent_message).replace(doc_match.group(), "").strip()
-            except Exception:
-                pass
 
     return {
-        "answer_text": agent_message,   # normal chat answer
-        "document": document            # if a doc was generated
+        "answer_text": agent_message
     }
 

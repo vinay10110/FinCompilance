@@ -2,6 +2,7 @@ import { Box, Flex, Text, useColorModeValue, HStack, IconButton, Tooltip } from 
 import { SignedIn, SignedOut, useClerk, UserButton, useUser } from '@clerk/clerk-react'
 import { Button } from '@chakra-ui/react'
 import { FiSettings, FiArrowLeft } from 'react-icons/fi'
+import { FaSlack } from 'react-icons/fa'
 import { useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import WorkflowDialog from './WorkflowDialog'
@@ -17,6 +18,12 @@ const Navigation = () => {
   
   // Check if we're on a workflow page
   const isOnWorkflowPage = location.pathname.startsWith('/workflows/')
+  
+  // Slack channel invite link from environment variables
+  const handleSlackJoin = () => {
+    const slackInviteUrl = import.meta.env.VITE_SLACK_INVITE_URL
+    window.open(slackInviteUrl, '_blank')
+  }
 
   return (
     <Box
@@ -58,6 +65,17 @@ const Navigation = () => {
 
         <HStack spacing={4}>
           <SignedIn>
+            <Tooltip label="Join our Slack community for updates and discussions">
+              <Button
+                variant="outline"
+                leftIcon={<FaSlack />}
+                onClick={handleSlackJoin}
+                colorScheme="purple"
+                size="sm"
+              >
+                Join Slack
+              </Button>
+            </Tooltip>
             <Button
               variant="ghost"
               leftIcon={<FiSettings />}
@@ -68,6 +86,18 @@ const Navigation = () => {
             <UserButton afterSignOutUrl="/"/>
           </SignedIn>
           <SignedOut>
+            <Tooltip label="Join our Slack community for updates and discussions">
+              <Button
+                variant="outline"
+                leftIcon={<FaSlack />}
+                onClick={handleSlackJoin}
+                colorScheme="purple"
+                size="sm"
+                mr={2}
+              >
+                Join Slack
+              </Button>
+            </Tooltip>
             <Button onClick={() => openSignIn()} colorScheme="blue">
               Sign In
             </Button>

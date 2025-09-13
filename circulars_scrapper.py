@@ -3,6 +3,7 @@ from datetime import datetime
 from playwright.async_api import async_playwright
 from neon_database import db
 import hashlib
+from notifications import notify_new_circulars
 
 page_url = "https://rbi.org.in/Scripts/BS_ViewMasterCirculardetails.aspx"
 
@@ -219,6 +220,12 @@ async def scrape_rbi_circulars():
                 except Exception as e:
                     print(f"Error saving circular to DB: {e}")
                     continue
+            
+            # Send Slack notification for new circulars
+            try:
+                notify_new_circulars(new_data)
+            except Exception as e:
+                print(f"Error sending Slack notification: {e}")
 
         print(f"Total new circulars found: {len(new_data)}")
         return new_data

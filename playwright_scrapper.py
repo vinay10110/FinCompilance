@@ -4,6 +4,7 @@ from playwright.async_api import async_playwright
 from neon_database import db
 import hashlib
 import re
+from notifications import notify_new_press_releases
 
 page_url = "https://rbi.org.in/Scripts/BS_PressreleaseDisplay.aspx"
 
@@ -101,6 +102,12 @@ async def scrape_rbi():
                 except Exception as e:
                     print(f"Error saving press release to DB: {e}")
                     pass
+            
+            # Send Slack notification for new press releases
+            try:
+                notify_new_press_releases(new_data)
+            except Exception as e:
+                print(f"Error sending Slack notification: {e}")
         else:
             print("No new press releases to save")
 

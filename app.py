@@ -36,14 +36,14 @@ class StandardResponse(BaseModel):
     messages: Optional[List[Dict[str, Any]]] = None
     data: Optional[Dict[str, Any]] = None
 
-# Workflow-related models
+
 class CreateWorkflowRequest(BaseModel):
     user_id: str
     name: Optional[str] = None
     description: Optional[str] = None
 
 class AddDocumentToWorkflowRequest(BaseModel):
-    doc_type: str  # 'press_release' | 'circular'
+    doc_type: str  
     doc_id: str
 
 class WorkflowChatRequest(BaseModel):
@@ -59,18 +59,17 @@ class WorkflowChatHistoryRequest(BaseModel):
 class SaveWorkflowChatMessageRequest(BaseModel):
     workflow_id: str
     user_id: str
-    role: str  # 'user' or 'assistant'
+    role: str 
     content: str
     document_data: Optional[Dict[str, Any]] = None
 
 class RemoveDocumentFromWorkflowRequest(BaseModel):
-    doc_type: str  # 'press_release' | 'circular'
-    doc_id: int  # integer ID from workflow_documents table
+    doc_type: str  
+    doc_id: int 
 
 class DeleteWorkflowRequest(BaseModel):
-    user_id: str  # Clerk user ID
+    user_id: str  
 
-# Initialize database connection and tables
 try:
     print("Initializing database connection...")
     if db.connect():
@@ -427,10 +426,6 @@ async def workflow_chat(workflow_id: str, data: WorkflowChatRequest, user_id: st
     Process workflow chat message using workflow-specific documents and save to database
     """
     try:
-        print(f"🔍 Workflow chat - workflow_id: {workflow_id}, user_id: {user_id}")
-        print(f"📄 Query: {data.query}")
-        print(f"📄 Doc IDs: {data.doc_ids}")
-        print(f"📄 Doc Titles: {data.doc_titles}")
         
         if not data.doc_ids or not data.doc_titles:
             raise HTTPException(
@@ -444,8 +439,6 @@ async def workflow_chat(workflow_id: str, data: WorkflowChatRequest, user_id: st
                 detail="Mismatch between doc_ids and doc_titles count"
             )
         
-        # Save user message to database
-        print(f"💾 Saving user message to database...")
         db.save_workflow_chat_message(
             workflow_id=workflow_id,
             user_id=user_id,
@@ -455,11 +448,9 @@ async def workflow_chat(workflow_id: str, data: WorkflowChatRequest, user_id: st
         )
         
         # Call workflow agent
-        print(f"🤖 Calling workflow agent...")
         response = ask_workflow_question(data.query, data.doc_ids, data.doc_titles)
         
         # Save assistant response to database
-        print(f"💾 Saving assistant response to database...")
         db.save_workflow_chat_message(
             workflow_id=workflow_id,
             user_id=user_id,
@@ -468,7 +459,6 @@ async def workflow_chat(workflow_id: str, data: WorkflowChatRequest, user_id: st
             document_data=response.get("document")
         )
         
-        print(f"✅ Workflow chat completed and saved to database")
         return StandardResponse(
             status="success",
             message="Workflow chat response generated successfully",
