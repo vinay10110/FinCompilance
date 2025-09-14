@@ -89,66 +89,38 @@ except Exception as e:
 app = FastAPI()
 
 # -----------------------
-# Background Scraping Functions
+# Startup Scraping Functions
 # -----------------------
-async def background_scraper():
-    """Background task to periodically scrape RBI data"""
-    executor = ThreadPoolExecutor(max_workers=2)
-    loop = asyncio.get_event_loop()
-    
-    while True:
-        try:
-            print("🔄 Starting background scraping...")
-            
-            # Run scrapers in thread pool to avoid blocking event loop
-            print("📄 Scraping RBI circulars...")
-            circulars_result = await loop.run_in_executor(executor, scrape_and_save_circulars)
-            print(f"✅ Found {len(circulars_result)} new circulars")
-            
-            print("📰 Scraping RBI press releases...")
-            press_releases_result = await loop.run_in_executor(executor, scrape_and_save_press_releases)
-            print(f"✅ Found {len(press_releases_result)} new press releases")
-            
-            print("✅ Background scraping completed successfully")
-            
-        except Exception as e:
-            print(f"❌ Error in background scraping: {str(e)}")
-            import traceback
-            print(f"Detailed error: {traceback.format_exc()}")
-        
-        # Wait 5 minutes before next scrape
-        await asyncio.sleep(300)  # 300 seconds = 5 minutes
 
 @app.on_event("startup")
 async def startup_event():
-    """Run initial scraping and start background scraper on startup"""
+    """Run one-time scraping on application startup"""
     print("🚀 Application starting up...")
     
     try:
-        # Run initial scraping in thread pool
-        print("🔄 Running initial data scraping...")
+        # Run one-time scraping in thread pool
+        print("🔄 Running startup data scraping...")
         loop = asyncio.get_event_loop()
         executor = ThreadPoolExecutor(max_workers=2)
         
-        # Initial scrape of circulars
-        print("📄 Initial scraping of RBI circulars...")
+        # Scrape circulars
+        print("📄 Scraping RBI circulars...")
         circulars_result = await loop.run_in_executor(executor, scrape_and_save_circulars)
-        print(f"✅ Initial scrape: Found {len(circulars_result)} new circulars")
+        print(f"✅ Found {len(circulars_result)} new circulars")
         
-        # Initial scrape of press releases
-        print("📰 Initial scraping of RBI press releases...")
+        # Scrape press releases
+        print("📰 Scraping RBI press releases...")
         press_releases_result = await loop.run_in_executor(executor, scrape_and_save_press_releases)
-        print(f"✅ Initial scrape: Found {len(press_releases_result)} new press releases")
+        print(f"✅ Found {len(press_releases_result)} new press releases")
         
-        # Schedule background scraper in the existing event loop
-        print("🔄 Scheduling background scraper...")
-        asyncio.create_task(background_scraper())
-        print("✅ Background scraper scheduled successfully")
+        print("✅ Startup scraping completed successfully")
+        print("📊 Application ready to serve requests")
         
     except Exception as e:
         print(f"❌ Error during startup scraping: {str(e)}")
         import traceback
         print(f"Detailed error: {traceback.format_exc()}")
+        print("⚠️ Application will continue without initial scraping data")
 
 # -----------------------
 # Middleware
@@ -675,4 +647,9 @@ async def delete_workflow(workflow_id: str, data: DeleteWorkflowRequest):
 
 if __name__ == '__main__':
     import uvicorn
-    uvicorn.run("app:app", host="127.0.0.1", port=5000, reload=True)
+    # Use environment variables for production deployment
+    host = os.getenv("HOST", "0.0.0.0")  # Bind to all interfaces for Render
+    port = int(os.getenv("PORT", 5000))  # Use Render's provided PORT
+    reload = os.getenv("ENVIRONMENT", "development") == "development"  # Only reload in dev
+    
+    uvicorn.run("app:app", host=host, port=port, reload=reload)

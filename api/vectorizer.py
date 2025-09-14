@@ -1,20 +1,50 @@
 import requests
 from io import BytesIO
 from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain.schema import Document
 import hashlib
 import os
 from dotenv import load_dotenv
 import pdfplumber
 from sentence_transformers import SentenceTransformer
 from pinecone import Pinecone
-from langchain.schema import Document
+import numpy as np
+
 # Load environment variables
 load_dotenv()
 
-model = SentenceTransformer('all-mpnet-base-v2')
-pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
+# Global variables for lazy loading
+_pc = None
+_index = None
+_model = None
 
-index = pc.Index("fincompilance")
+def get_pinecone_client():
+    """Lazy load Pinecone client"""
+    global _pc
+    if _pc is None:
+        print("🔄 Loading Pinecone client...")
+        _pc = Pinecone(api_key=os.getenv("PINECONE_API_KEY"))
+        print("✅ Pinecone client loaded")
+    return _pc
+
+def get_pinecone_index():
+    """Lazy load Pinecone index"""
+    global _index
+    if _index is None:
+        print("🔄 Loading Pinecone index...")
+        pc = get_pinecone_client()
+        _index = pc.Index("fincompilance")
+        print("✅ Pinecone index loaded")
+    return _index
+
+def get_sentence_transformer():
+    """Lazy load SentenceTransformer model"""
+    global _model
+    if _model is None:
+        print("🔄 Loading SentenceTransformer model...")
+        _model = SentenceTransformer('all-mpnet-base-v2')
+        print("✅ SentenceTransformer model loaded")
+    return _model
 
 def get_namespace_name(doc_id: str) -> str:
     """Generate a consistent namespace name for each document."""
@@ -33,7 +63,7 @@ def process_and_store_pdf(pdf_link: str, doc_id: str = None) -> str:
             doc_id = f"doc_{hashlib.sha256(pdf_link.encode()).hexdigest()[:16]}"
         
         namespace_name = get_namespace_name(doc_id)
-        stats = index.describe_index_stats()
+        stats = get_pinecone_index().describe_index_stats()
         if namespace_name in stats.get("namespaces", {}):
             return namespace_name
         headers = {
@@ -79,13 +109,13 @@ def process_and_store_pdf(pdf_link: str, doc_id: str = None) -> str:
         all_chunks = text_chunks + [Document(page_content=t) for t in table_chunks]
         vectors = []
         for i, chunk in enumerate(all_chunks):
-            embedding = model.encode(chunk.page_content).tolist()
+            embedding = get_sentence_transformer().encode(chunk.page_content).tolist()
             vectors.append({
                 "id": f"{doc_id}_chunk_{i}",
                 "values": embedding,
                 "metadata": {"text": chunk.page_content, "doc_id": doc_id}
             })
-        index.upsert(vectors=vectors, namespace=namespace_name)
+        get_pinecone_index().upsert(vectors=vectors, namespace=namespace_name)
     except requests.exceptions.RequestException as e:
         print(f"Error downloading PDF: {e}")
         raise
@@ -93,5 +123,76 @@ def process_and_store_pdf(pdf_link: str, doc_id: str = None) -> str:
         print(f"Error processing PDF: {e}")
         raise
 
+
+def vectorize_pdf(pdf_path: str, doc_id: str):
+    """
+    Extract text from PDF, chunk it, vectorize with SentenceTransformer,
+    and store in Pinecone with doc_id as namespace.
+    """
+    try:
+        # Lazy load models
+        model = get_sentence_transformer()
+        index = get_pinecone_index()
+        
+        # Extract text from PDF
+        text_content = ""
+        with pdfplumber.open(pdf_path) as pdf:
+            for page in pdf.pages:
+                page_text = page.extract_text()
+                if page_text:
+                    text_content += page_text + "\n"
+
+        if not text_content.strip():
+            return {"error": "No text content found in PDF"}
+
+        # Chunk the text (simple approach: split by paragraphs or fixed size)
+        chunks = chunk_text(text_content)
+        
+        if not chunks:
+            return {"error": "No chunks created from PDF text"}
+
+        # Vectorize each chunk and prepare for Pinecone
+        vectors_to_upsert = []
+        for i, chunk in enumerate(chunks):
+            # Create embedding
+            embedding = model.encode(chunk)
+            
+            # Convert numpy array to list if needed
+            if isinstance(embedding, np.ndarray):
+                embedding = embedding.astype(float).tolist()
+            
+            # Create unique ID for this chunk
+            chunk_id = f"{doc_id}_chunk_{i}"
+            
+            # Prepare vector with metadata
+            vector_data = {
+                "id": chunk_id,
+                "values": embedding,
+                "metadata": {
+                    "text": chunk,
+                    "doc_id": doc_id,
+                    "chunk_index": i
+                }
+            }
+            vectors_to_upsert.append(vector_data)
+
+        # Upsert to Pinecone using doc_id as namespace
+        namespace = f"pdf_chunks_{doc_id}"
+        index.upsert(vectors=vectors_to_upsert, namespace=namespace)
+        
+        return {
+            "success": True,
+            "chunks_processed": len(chunks),
+            "namespace": namespace,
+            "doc_id": doc_id
+        }
+        
+    except Exception as e:
+        return {"error": f"Error processing PDF: {str(e)}"}
+
+def chunk_text(text):
+    # Simple chunking approach: split by paragraphs
+    chunks = text.split("\n\n")
+    return chunks
 
 get_collection_name = get_namespace_name
