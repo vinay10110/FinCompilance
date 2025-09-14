@@ -1,7 +1,8 @@
 import asyncio
 import sys
+from concurrent.futures import ThreadPoolExecutor
 
-# Fix for Windows event loop policy - use SelectorEventLoop for Playwright compatibility
+# Fix for Windows event loop policy
 if sys.platform.startswith("win"):
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
@@ -15,7 +16,7 @@ from neon_database import db
 import traceback
 from llm import ask_doc_question
 from circulars_scrapper import scrape_and_save_circulars
-from playwright_scrapper import scrape_and_save_press_releases
+from press_scrapper import scrape_and_save_press_releases
 from workflow_agent import ask_workflow_question
 
 # Load environment variables
@@ -92,18 +93,20 @@ app = FastAPI()
 # -----------------------
 async def background_scraper():
     """Background task to periodically scrape RBI data"""
+    executor = ThreadPoolExecutor(max_workers=2)
+    loop = asyncio.get_event_loop()
+    
     while True:
         try:
             print("🔄 Starting background scraping...")
             
-            # Scrape circulars
+            # Run scrapers in thread pool to avoid blocking event loop
             print("📄 Scraping RBI circulars...")
-            circulars_result = await scrape_and_save_circulars()
+            circulars_result = await loop.run_in_executor(executor, scrape_and_save_circulars)
             print(f"✅ Found {len(circulars_result)} new circulars")
             
-            # Scrape press releases
             print("📰 Scraping RBI press releases...")
-            press_releases_result = await scrape_and_save_press_releases()
+            press_releases_result = await loop.run_in_executor(executor, scrape_and_save_press_releases)
             print(f"✅ Found {len(press_releases_result)} new press releases")
             
             print("✅ Background scraping completed successfully")
@@ -122,17 +125,19 @@ async def startup_event():
     print("🚀 Application starting up...")
     
     try:
-        # Run initial scraping
+        # Run initial scraping in thread pool
         print("🔄 Running initial data scraping...")
+        loop = asyncio.get_event_loop()
+        executor = ThreadPoolExecutor(max_workers=2)
         
         # Initial scrape of circulars
         print("📄 Initial scraping of RBI circulars...")
-        circulars_result = await scrape_and_save_circulars()
+        circulars_result = await loop.run_in_executor(executor, scrape_and_save_circulars)
         print(f"✅ Initial scrape: Found {len(circulars_result)} new circulars")
         
         # Initial scrape of press releases
         print("📰 Initial scraping of RBI press releases...")
-        press_releases_result = await scrape_and_save_press_releases()
+        press_releases_result = await loop.run_in_executor(executor, scrape_and_save_press_releases)
         print(f"✅ Initial scrape: Found {len(press_releases_result)} new press releases")
         
         # Schedule background scraper in the existing event loop

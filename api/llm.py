@@ -1,5 +1,4 @@
 from langchain_openai import ChatOpenAI  
-from langchain.agents import Tool
 from langgraph.prebuilt import create_react_agent
 from sentence_transformers import SentenceTransformer
 from pinecone import Pinecone

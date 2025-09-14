@@ -1,0 +1,12 @@
+fastapi
+requests
+langchain
+python-dotenv
+pdfplumber
+sentence-transformers
+pinecone
+psycopg2
+langchain-openai
+langgraph
+beautifulsoup4
+uvicorn

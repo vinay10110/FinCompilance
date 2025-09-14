@@ -5,9 +5,6 @@ from pinecone import Pinecone
 from langchain.tools import StructuredTool
 import os
 from dotenv import load_dotenv
-from docx import Document
-from io import BytesIO
-import base64
 import numpy as np
 
 # Load environment variables
