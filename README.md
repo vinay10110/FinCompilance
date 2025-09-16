@@ -1,7 +1,5 @@
 # FinCompliance — AI‑powered RBI Compliance Assistant
 
-Live demo: https://fin-compilance.vercel.app/
-
 FinCompliance helps compliance teams monitor RBI regulatory updates and turn official documents into actionable answers. It continuously collects RBI Master Circulars and Press Releases, lets you pull any PDF into a vector store, and enables grounded, document-centric chat and workflow-based analysis.
 
 The assistant is designed to be precise, conservative, and explicitly grounded in the retrieved RBI content.
