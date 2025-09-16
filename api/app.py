@@ -106,6 +106,19 @@ app.add_middleware(
         "Cache-Control"
     ],
 )
+@app.middleware("http")
+async def add_cors_headers(request, call_next):
+    response = await call_next(request)
+    print(f"🌐 CORS middleware applied for {request.method} {request.url.path}")
+    response.headers["Access-Control-Allow-Origin"] = "https://fin-compilance.vercel.app"
+    response.headers["Access-Control-Allow-Credentials"] = "true"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, PATCH, OPTIONS"
+    response.headers["Access-Control-Allow-Headers"] = (
+        "Accept, Accept-Language, Content-Language, Content-Type, "
+        "Authorization, Content-Length, X-Requested-With, Origin, "
+        "User-Agent, Referer, Cache-Control"
+    )
+    return response
 
 @app.on_event("startup")
 async def startup_event():
