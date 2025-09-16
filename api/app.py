@@ -122,17 +122,10 @@ async def startup_event():
         print(f"Detailed error: {traceback.format_exc()}")
         print("⚠️ Application will continue without initial scraping data")
 
-# -----------------------
-# Middleware
-# -----------------------
-origins = [
-    os.getenv("HOST_ADDRESS", "https://fin-compilance.vercel.app"),
-    "http://localhost:3000",   # for local dev
-]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins="https://fin-compilance.vercel.app",
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization", "Content-Length", "X-Requested-With"],
