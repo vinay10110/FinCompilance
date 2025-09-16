@@ -87,10 +87,13 @@ except Exception as e:
 
 
 app = FastAPI()
-
-# -----------------------
-# Startup Scraping Functions
-# -----------------------
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["https://fin-compilance.vercel.app"],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "Content-Length", "X-Requested-With"],
+)
 
 @app.on_event("startup")
 async def startup_event():
@@ -121,15 +124,6 @@ async def startup_event():
         import traceback
         print(f"Detailed error: {traceback.format_exc()}")
         print("⚠️ Application will continue without initial scraping data")
-
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["https://fin-compilance.vercel.app"],
-    allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization", "Content-Length", "X-Requested-With"],
-)
 
 @app.get("/get_updates", response_model=StandardResponse)
 async def get_updates():
