@@ -5,7 +5,7 @@ python-dotenv
 pdfplumber
 sentence-transformers
 pinecone
-psycopg2
+psycopg2-binary
 langchain-openai
 langgraph
 beautifulsoup4
