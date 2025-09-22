@@ -21,6 +21,16 @@ The assistant is designed to be precise, conservative, and explicitly grounded i
 - Vector/ML: Pinecone, sentence‑transformers (all‑mpnet‑base‑v2), OpenRouter + ChatOpenAI
 - Database: Postgres (Neon)
 
+## Screenshots
+
+![Home and updates](client/screenshots/Screenshot%202025-09-22%20155059.png)
+
+![Document view (Pull & Chat)](client/screenshots/Screenshot%202025-09-22%20155254.png)
+
+![Grounded Q&A](client/screenshots/Screenshot%202025-09-22%20155404.png)
+
+![Workflows](client/screenshots/Screenshot%202025-09-22%20155545.png)
+
 ## Run Locally
 
 Prerequisites:
@@ -94,6 +104,6 @@ Frontend (`client/.env`):
 
 Never commit `.env` files to version control.
 
-## Acknowledge
+## Acknowledgments
 
 This project was developed during Symbiot Hackathon 2025.
